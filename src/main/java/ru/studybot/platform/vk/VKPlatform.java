@@ -23,6 +23,7 @@ public class VKPlatform implements Platform {
     private static final int LONG_POLL_WAIT = 25;
 
     private final String token;
+    private final int groupId;
     private final Bot bot;
     private final HttpClient http;
     private final ObjectMapper mapper;
@@ -30,10 +31,11 @@ public class VKPlatform implements Platform {
 
     private String lpServer;
     private String lpKey;
-    private int lpTs;
+    private String lpTs;
 
-    public VKPlatform(String token, Bot bot) {
+    public VKPlatform(String token, int groupId, Bot bot) {
         this.token = token;
+        this.groupId = groupId;
         this.bot = bot;
         this.http = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
@@ -62,10 +64,10 @@ public class VKPlatform implements Platform {
     }
 
     @Override
-    public void sendMessage(long userId, String text) {
+    public void sendMessage(long peerId, String text) {
         try {
             String url = API_BASE + "messages.send"
-                    + "?user_id=" + userId
+                    + "?peer_id=" + peerId
                     + "&random_id=" + random.nextInt()
                     + "&message=" + URLEncoder.encode(text, StandardCharsets.UTF_8)
                     + "&access_token=" + token
@@ -76,14 +78,16 @@ public class VKPlatform implements Platform {
                     .build();
             http.send(request, HttpResponse.BodyHandlers.ofString());
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "Не удалось отправить сообщение пользователю " + userId, e);
+            LOG.log(Level.WARNING, "Не удалось отправить сообщение: " + peerId, e);
         }
     }
 
     private void initLongPollServer() {
         try {
-            String url = API_BASE + "messages.getLongPollServer"
-                    + "?access_token=" + token + "&v=" + API_VERSION;
+            String url = API_BASE + "groups.getLongPollServer"
+                    + "?group_id=" + groupId
+                    + "&access_token=" + token
+                    + "&v=" + API_VERSION;
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .GET()
@@ -93,14 +97,14 @@ public class VKPlatform implements Platform {
             JsonNode resp = root.path("response");
             lpServer = resp.path("server").asText();
             lpKey = resp.path("key").asText();
-            lpTs = resp.path("ts").asInt();
+            lpTs = resp.path("ts").asText();
         } catch (Exception e) {
             throw new RuntimeException("Не удалось получить Long Poll сервер", e);
         }
     }
 
     private void pollEvents() throws Exception {
-        String url = "https://" + lpServer
+        String url = lpServer
                 + "?act=a_check"
                 + "&key=" + URLEncoder.encode(lpKey, StandardCharsets.UTF_8)
                 + "&ts=" + lpTs
@@ -112,27 +116,36 @@ public class VKPlatform implements Platform {
                 .build();
         HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
         JsonNode root = mapper.readTree(response.body());
-        if (root.has("ts")) {
-            lpTs = root.get("ts").asInt();
-        }
+
         if (root.has("failed")) {
-            initLongPollServer();
+            int failed = root.path("failed").asInt();
+            LOG.warning("Long Poll ошибка: code=" + failed);
+            if (failed == 1) {
+                lpTs = root.path("ts").asText();
+            } else {
+                initLongPollServer();
+            }
             return;
         }
+
+        if (root.has("ts")) {
+            lpTs = root.get("ts").asText();
+        }
+
         JsonNode updates = root.path("updates");
         for (JsonNode update : updates) {
-            int type = update.path("type").asInt();
-            if (type == 4) {
-                JsonNode msg = update.path("object");
-                long userId = msg.path("user_id").asLong();
-                String text = msg.path("text").asText();
-                int flags = update.path("extra_values").path("flags").asInt(0);
-                if ((flags & 2) != 0) {
-                    continue;
-                }
-                String reply = bot.processMessage(text, userId);
-                sendMessage(userId, reply);
+            String type = update.path("type").asText();
+            if ("message_new".equals(type)) {
+                JsonNode message = update.path("object").path("message");
+                long peerId = message.path("peer_id").asLong();
+                String text = message.path("text").asText();
+
+                LOG.info("Получено сообщение от " + peerId + ": " + text);
+
+                String reply = bot.processMessage(text, peerId);
+                sendMessage(peerId, reply);
             }
         }
     }
 }
+

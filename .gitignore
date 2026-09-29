@@ -45,3 +45,5 @@ logs/
 *.class
 *.jar
 *.war
+
+config.properties

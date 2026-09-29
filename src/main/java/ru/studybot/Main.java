@@ -9,7 +9,8 @@ import ru.studybot.platform.vk.VKPlatform;
 
 public class Main {
     public static void main(String[] args) {
-        String token = System.getenv("VK_TOKEN");
+        String token = BotConfig.get("vk.access.token");
+        int groupId = Integer.parseInt(BotConfig.get("vk.group.id"));
         if (token == null || token.isBlank()) {
             System.err.println("Не задана переменная окружения VK_TOKEN");
             System.exit(1);
@@ -19,7 +20,7 @@ public class Main {
         registry.register(new AboutCommand());
         registry.register(new HelpCommand(registry));
         Bot bot = new Bot(registry);
-        VKPlatform platform = new VKPlatform(token, bot);
+        VKPlatform platform = new VKPlatform(token, groupId, bot);
         platform.start();
     }
 }
