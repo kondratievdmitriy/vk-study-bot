@@ -1,0 +1,47 @@
+# ===== Maven =====
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# ===== IntelliJ IDEA =====
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# ===== Eclipse =====
+.project
+.classpath
+.settings/
+*.launch
+bin/
+
+# ===== VS Code =====
+.vscode/
+
+# ===== OS-specific =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== Secrets =====
+.env
+application-local.properties
+*.secret
+
+# ===== Logs =====
+*.log
+logs/
+
+# ===== Compiled artifacts (outside Maven) =====
+*.class
+*.jar
+*.war
