@@ -1,4 +1,9 @@
 package ru.studybot.command;
+/**
+ * Команда /about.
+ * Предоставляет пользователю информацию о назначении, концепции и основных 
+ * принципах работы бота Study Bot.
+ */
 
 public class AboutCommand implements Command {
     @Override

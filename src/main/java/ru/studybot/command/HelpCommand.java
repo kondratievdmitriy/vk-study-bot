@@ -1,6 +1,11 @@
 package ru.studybot.command;
 
 import java.util.Collection;
+/**
+ * Команда /help.
+ * Предоставляет пользователю список всех доступных команд или подробную справку 
+ * по конкретной команде, если передано её имя в качестве аргумента.
+ */
 
 public class HelpCommand implements Command {
     private final CommandRegistry registry;

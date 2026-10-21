@@ -3,6 +3,11 @@ package ru.studybot.command;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
+/**
+ * Модульные тесты для команды HelpCommand.
+ * Проверяют корректность генерации общего списка команд, 
+ * вывод подробной справки по конкретной команде и обработку ошибок.
+ */
 
 class HelpCommandTest {
     private CommandRegistry registry;

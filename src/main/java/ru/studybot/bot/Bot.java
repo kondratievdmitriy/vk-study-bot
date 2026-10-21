@@ -3,6 +3,11 @@ package ru.studybot.bot;
 import ru.studybot.command.Command;
 import ru.studybot.command.CommandRegistry;
 import java.util.Optional;
+/**
+ * Главный класс бота, отвечающий за первичную обработку входящих текстовых сообщений.
+ * Выступает в роли диспетчера (роутера): разбирает текст сообщения, 
+ * извлекает название команды и аргументы, ищет команду в реестре и передает ей управление.
+ */
 
 public class Bot {
     private static final String PREFIX = "/";
