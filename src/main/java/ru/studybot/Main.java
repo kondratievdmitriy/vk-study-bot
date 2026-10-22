@@ -6,6 +6,11 @@ import ru.studybot.command.AuthorCommand;
 import ru.studybot.command.CommandRegistry;
 import ru.studybot.command.HelpCommand;
 import ru.studybot.platform.vk.VKPlatform;
+/**
+ * Точка входа в приложение (Entry Point).
+ * Отвечает за загрузку конфигурации, инициализацию всех компонентов бота 
+ * и запуск платформы для прослушивания сообщений.
+ */
 
 public class Main {
     public static void main(String[] args) {

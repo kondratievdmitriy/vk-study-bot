@@ -3,6 +3,11 @@ package ru.studybot;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.Properties;
+/**
+ * Класс для управления конфигурацией бота.
+ * Загружает настройки из файла config.properties при первом обращении к классу
+ * и предоставляет статические методы для безопасного получения значений.
+ */
 
 public class BotConfig {
     private static final Properties props = new Properties();

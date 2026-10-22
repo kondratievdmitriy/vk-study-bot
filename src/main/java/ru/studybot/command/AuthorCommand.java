@@ -1,4 +1,8 @@
 package ru.studybot.command;
+/**
+ * Команда /author.
+ * Предоставляет пользователю информацию о создателях и разработчиках проекта Study Bot.
+ */
 
 public class AuthorCommand implements Command {
     @Override
@@ -12,8 +16,8 @@ public class AuthorCommand implements Command {
     @Override
     public String execute(String args, long userId) {
         return "📚 Study Bot\nАвторы проекта:\n"
-                + "— [Имя Автора 1] — разработчик\n"
-                + "— [Имя Автора 2] — разработчик\n\n"
+                + "— [Дмитрий Кондратьев] — разработчик\n"
+                + "— [Ашихмин Егор] — разработчик\n\n"
                 + "Проект создан в рамках изучения ООП на Java.";
     }
 }

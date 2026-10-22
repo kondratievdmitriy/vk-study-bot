@@ -2,7 +2,11 @@ package ru.studybot.command;
 
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
-
+/**
+ * Модульные тесты для команды AboutCommand.
+ * Проверяют базовые контракты интерфейса Command и корректность 
+ * возвращаемого текста описания бота.
+ */
 class AboutCommandTest {
     private final AboutCommand command = new AboutCommand();
 

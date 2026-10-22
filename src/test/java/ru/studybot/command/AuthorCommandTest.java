@@ -2,6 +2,11 @@ package ru.studybot.command;
 
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
+/**
+ * Модульные тесты для команды AuthorCommand.
+ * Проверяют базовые контракты интерфейса Command и корректность 
+ * возвращаемого текста с информацией об авторах.
+ */
 
 class AuthorCommandTest {
     private final AuthorCommand command = new AuthorCommand();

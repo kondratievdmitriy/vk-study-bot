@@ -7,6 +7,11 @@ import ru.studybot.command.AuthorCommand;
 import ru.studybot.command.CommandRegistry;
 import ru.studybot.command.HelpCommand;
 import static org.junit.jupiter.api.Assertions.*;
+/**
+ * Модульные тесты для класса Bot.
+ * Проверяют корректность парсинга сообщений, маршрутизации команд 
+ * и обработки граничных случаев (edge cases) без необходимости запуска реального VK API.
+ */
 
 class BotTest {
     private CommandRegistry registry;
