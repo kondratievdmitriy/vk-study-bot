@@ -16,23 +16,23 @@ public class UploadCommand implements Command {
 
     @Override
     public String getName() {
-        return "/upload";
+        return "upload";
     }
 
     @Override
     public String getDescription() {
-        return "Загрузка учебного материала: название книги|тема|текст";
+        return "Загрузка учебного материала: название книги | тема | текст";
     }
 
     @Override
     public String execute(String args, long userId) {
         if (args == null || args.trim().isEmpty()) {
-            return "Ошибка: укажите данные в формате: Название книги|Тема|Текст";
+            return "Ошибка: укажите данные в формате: Название книги | Тема | Текст";
         }
 
         String[] parts = args.split("\\|", 3);
         if (parts.length < 3) {
-            return "Ошибка: неверный формат. Используйте: Название книги|Тема|Текст (разделитель |)";
+            return "Ошибка: неверный формат. Используйте: Название книги | Тема | Текст (разделитель |)";
         }
 
         String bookTitle = parts[0].trim();
