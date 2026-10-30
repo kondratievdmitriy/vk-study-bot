@@ -5,27 +5,41 @@ import ru.studybot.command.AboutCommand;
 import ru.studybot.command.AuthorCommand;
 import ru.studybot.command.CommandRegistry;
 import ru.studybot.command.HelpCommand;
+import ru.studybot.command.UploadCommand; // <-- новый импорт
 import ru.studybot.platform.vk.VKPlatform;
+import ru.studybot.repository.BookRepository;
+import ru.studybot.repository.LessonRepository;
+import ru.studybot.repository.impl.InMemoryBookRepository; // <-- новые импорты
+import ru.studybot.repository.impl.InMemoryLessonRepository;
+
 /**
  * Точка входа в приложение (Entry Point).
- * Отвечает за загрузку конфигурации, инициализацию всех компонентов бота 
- * и запуск платформы для прослушивания сообщений.
  */
-
 public class Main {
     public static void main(String[] args) {
         String token = BotConfig.get("vk.access.token");
         int groupId = Integer.parseInt(BotConfig.get("vk.group.id"));
+
         if (token == null || token.isBlank()) {
             System.err.println("Не задана переменная окружения VK_TOKEN");
             System.exit(1);
         }
+
         CommandRegistry registry = new CommandRegistry();
+
+        // Репозитории (InMemory — заглушка до MongoDB)
+        BookRepository bookRepo = new InMemoryBookRepository();
+        LessonRepository lessonRepo = new InMemoryLessonRepository();
+
+        // Регистрируем команды
         registry.register(new AuthorCommand());
         registry.register(new AboutCommand());
         registry.register(new HelpCommand(registry));
+        registry.register(new UploadCommand(bookRepo, lessonRepo)); // <-- твоя новая команда
+
         Bot bot = new Bot(registry);
         VKPlatform platform = new VKPlatform(token, groupId, bot);
         platform.start();
     }
 }
+
