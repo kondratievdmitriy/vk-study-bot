@@ -14,8 +14,8 @@ public class AboutCommand implements Command {
     public String getDetailedHelp() {
         return "/about — выводит описание назначения бота и его концепции.\nИспользование: /about";
     }
-    @Override
-    public String execute(String args, long userId) {
+        @Override
+    public String execute(MessageContext context) {
         return "📖 Study Bot — бот для поэтапного изучения учебных материалов.\n\n"
                 + "Как это работает:\n"
                 + "1. Вы загружаете учебный материал (книгу, конспект лекций).\n"

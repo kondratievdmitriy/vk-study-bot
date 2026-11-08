@@ -6,12 +6,13 @@ import ru.studybot.command.AboutCommand;
 import ru.studybot.command.AuthorCommand;
 import ru.studybot.command.CommandRegistry;
 import ru.studybot.command.HelpCommand;
+import ru.studybot.command.UploadCommand;
+import ru.studybot.repository.impl.InMemoryBookRepository;
+import ru.studybot.repository.impl.InMemoryLessonRepository;
+
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
-/**
- * Модульные тесты для класса Bot.
- * Проверяют корректность парсинга сообщений, маршрутизации команд 
- * и обработки граничных случаев (edge cases) без необходимости запуска реального VK API.
- */
 
 class BotTest {
     private CommandRegistry registry;
@@ -23,31 +24,40 @@ class BotTest {
         registry.register(new AuthorCommand());
         registry.register(new AboutCommand());
         registry.register(new HelpCommand(registry));
+        registry.register(new UploadCommand(
+                new InMemoryBookRepository(), new InMemoryLessonRepository()));
         bot = new Bot(registry);
     }
 
     @Test
     void processesSlashCommand() {
-        assertTrue(bot.processMessage("/author", 1L).contains("Авторы"));
+        assertTrue(bot.processMessage("/author", 1L, List.of()).contains("Авторы"));
     }
 
     @Test
     void processesCommandWithoutSlash() {
-        assertTrue(bot.processMessage("about", 1L).contains("Study Bot"));
+        assertTrue(bot.processMessage("about", 1L, List.of()).contains("Study Bot"));
     }
 
     @Test
     void unknownCommandReturnsMessage() {
-        assertTrue(bot.processMessage("/unknown", 1L).contains("Неизвестная команда"));
+        assertTrue(bot.processMessage("/unknown", 1L, List.of()).contains("Неизвестная команда"));
     }
 
     @Test
     void emptyMessageReturnsHint() {
-        assertTrue(bot.processMessage("   ", 1L).contains("/help"));
+        assertTrue(bot.processMessage("   ", 1L, List.of()).contains("/help"));
     }
 
     @Test
     void helpWithArgument() {
-        assertTrue(bot.processMessage("/help author", 1L).contains("author"));
+        assertTrue(bot.processMessage("/help author", 1L, List.of()).contains("author"));
+    }
+
+    @Test
+    void uploadWithAttachmentHandlesInvalidUrl() {
+        // localhost:1 — соединение отклоняется мгновенно, тест не зависит от сети
+        String result = bot.processMessage("/upload Книга", 1L, List.of("http://localhost:1/file.pdf"));
+        assertTrue(result.contains("Не удалось"));
     }
 }
