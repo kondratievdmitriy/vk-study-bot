@@ -19,15 +19,15 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Базовый интерфейс для платформ, с которыми может работать бот.
+ * Реализация платформы VK для бота.
  * <p>
- * Этот интерфейс позволяет абстрагировать ядро бота (класс Bot) 
- * от конкретной социальной сети или мессенджера. 
- * Благодаря этому, в будущем можно будет легко добавить поддержку 
- * другой платформы (например, Telegram), просто создав новый класс, 
- * реализующий этот интерфейс, без изменения логики самого бота.
+ * Отвечает за связь с VK API: получение Long Poll сервера, приём событий
+ * (в том числе вложений-документов), отправка сообщений. Реализует интерфейс
+ * {@link ru.studybot.platform.Platform}, поэтому ядро бота не зависит от
+ * деталей протокола VK и в будущем может работать с другой платформой.
  * </p>
  */
+
 public class VKPlatform implements Platform {
     private static final Logger LOG = Logger.getLogger(VKPlatform.class.getName());
     private static final String API_BASE = "https://api.vk.com/method/";

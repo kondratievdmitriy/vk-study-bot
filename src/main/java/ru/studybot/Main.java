@@ -6,7 +6,6 @@ import ru.studybot.command.AuthorCommand;
 import ru.studybot.command.CommandRegistry;
 import ru.studybot.command.HelpCommand;
 import ru.studybot.command.UploadCommand; // <-- новый импорт
-import ru.studybot.command.ReadCommand;
 import ru.studybot.platform.vk.VKPlatform;
 import ru.studybot.repository.BookRepository;
 import ru.studybot.repository.LessonRepository;
@@ -36,8 +35,7 @@ public class Main {
         registry.register(new AuthorCommand());
         registry.register(new AboutCommand());
         registry.register(new HelpCommand(registry));
-        registry.register(new UploadCommand(bookRepo, lessonRepo)); // <-- твоя новая команда
-        registry.register(new ReadCommand());
+        registry.register(new UploadCommand(bookRepo, lessonRepo)); // <-- новая команда
 
         Bot bot = new Bot(registry);
         VKPlatform platform = new VKPlatform(token, groupId, bot);

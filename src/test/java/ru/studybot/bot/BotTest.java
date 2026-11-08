@@ -6,16 +6,14 @@ import ru.studybot.command.AboutCommand;
 import ru.studybot.command.AuthorCommand;
 import ru.studybot.command.CommandRegistry;
 import ru.studybot.command.HelpCommand;
+import ru.studybot.command.UploadCommand;
+import ru.studybot.repository.impl.InMemoryBookRepository;
+import ru.studybot.repository.impl.InMemoryLessonRepository;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * Модульные тесты для класса Bot.
- * Проверяют корректность парсинга сообщений, маршрутизации команд 
- * и обработки граничных случаев (edge cases) без необходимости запуска реального VK API.
- */
 class BotTest {
     private CommandRegistry registry;
     private Bot bot;
@@ -26,12 +24,13 @@ class BotTest {
         registry.register(new AuthorCommand());
         registry.register(new AboutCommand());
         registry.register(new HelpCommand(registry));
+        registry.register(new UploadCommand(
+                new InMemoryBookRepository(), new InMemoryLessonRepository()));
         bot = new Bot(registry);
     }
 
     @Test
     void processesSlashCommand() {
-        // Добавлен третий параметр: пустой список вложений
         assertTrue(bot.processMessage("/author", 1L, List.of()).contains("Авторы"));
     }
 
@@ -54,13 +53,11 @@ class BotTest {
     void helpWithArgument() {
         assertTrue(bot.processMessage("/help author", 1L, List.of()).contains("author"));
     }
-    
-    // Бонусный тест: проверяем, что бот корректно передает вложения (если захочешь протестировать ReadCommand позже)
+
     @Test
-    void processesMessageWithAttachment() {
-        // Здесь можно будет добавить тест для ReadCommand, когда он будет зарегистрирован
-        String result = bot.processMessage("/read", 1L, List.of("http://example.com/file.pdf"));
-        // Ожидаем ошибку, так как файл по этой ссылке не настоящий, но это подтверждает, что бот попытался его обработать
-        assertTrue(result.contains("Не удалось прочитать файл") || result.contains("Использование"));
+    void uploadWithAttachmentHandlesInvalidUrl() {
+        // localhost:1 — соединение отклоняется мгновенно, тест не зависит от сети
+        String result = bot.processMessage("/upload Книга", 1L, List.of("http://localhost:1/file.pdf"));
+        assertTrue(result.contains("Не удалось"));
     }
 }
