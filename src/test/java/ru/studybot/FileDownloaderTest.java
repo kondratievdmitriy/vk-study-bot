@@ -26,4 +26,13 @@ class FileDownloaderTest {
         assertThrows(IllegalArgumentException.class,
                 () -> FileDownloader.extensionOf("https://example.com/photo.jpg"));
     }
+    
+    @Test
+    void detectsExtensionFromContentType() {
+        assertEquals(".pdf", FileDownloader.extensionFromContentType("application/pdf"));
+        assertEquals(".txt", FileDownloader.extensionFromContentType("text/plain; charset=utf-8"));
+        assertNull(FileDownloader.extensionFromContentType(""));
+        assertNull(FileDownloader.extensionFromContentType("application/octet-stream"));
+    }
+
 }
