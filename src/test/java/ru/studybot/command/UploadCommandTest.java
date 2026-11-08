@@ -1,6 +1,8 @@
 package ru.studybot.command;
 
 import org.junit.jupiter.api.Test;
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 import ru.studybot.repository.BookRepository;
 import ru.studybot.repository.LessonRepository;
@@ -16,7 +18,10 @@ class UploadCommandTest {
         UploadCommand command = new UploadCommand(bookRepo, lessonRepo);
 
         String args = "Java ООП|Глава 1: Основы|В этой главе мы изучаем основы объектно-ориентированного программирования и принципы инкапсуляции.";
-        String result = command.execute(args, 99999L);
+        
+        // ИЗМЕНЕНИЕ: создаем MessageContext
+        MessageContext context = new MessageContext(99999L, args, List.of());
+        String result = command.execute(context);
 
         assertTrue(result.contains("Материал успешно загружен"));
         assertEquals(1, bookRepo.findAll().size());
@@ -30,7 +35,9 @@ class UploadCommandTest {
         LessonRepository lessonRepo = new InMemoryLessonRepository();
         UploadCommand command = new UploadCommand(bookRepo, lessonRepo);
 
-        String result = command.execute("Только название", 99999L);
+        // ИЗМЕНЕНИЕ: создаем MessageContext
+        MessageContext context = new MessageContext(99999L, "Только название", List.of());
+        String result = command.execute(context);
         assertTrue(result.contains("Ошибка: неверный формат"));
     }
 
@@ -40,8 +47,12 @@ class UploadCommandTest {
         LessonRepository lessonRepo = new InMemoryLessonRepository();
         UploadCommand command = new UploadCommand(bookRepo, lessonRepo);
 
-        command.execute("Java ООП|Глава 1|Текст 1", 99999L);
-        command.execute("Java ООП|Глава 2|Текст 2", 99999L);
+        // ИЗМЕНЕНИЕ: создаем MessageContext для каждого вызова
+        MessageContext context1 = new MessageContext(99999L, "Java ООП|Глава 1|Текст 1", List.of());
+        command.execute(context1);
+        
+        MessageContext context2 = new MessageContext(99999L, "Java ООП|Глава 2|Текст 2", List.of());
+        command.execute(context2);
 
         assertEquals(1, bookRepo.findAll().size());
         assertEquals(2, lessonRepo.findAll().size());
@@ -53,8 +64,9 @@ class UploadCommandTest {
         LessonRepository lessonRepo = new InMemoryLessonRepository();
         UploadCommand command = new UploadCommand(bookRepo, lessonRepo);
 
-        String result = command.execute("", 99999L);
+        // ИЗМЕНЕНИЕ: создаем MessageContext
+        MessageContext context = new MessageContext(99999L, "", List.of());
+        String result = command.execute(context);
         assertTrue(result.contains("Ошибка: укажите данные"));
     }
 }
-

@@ -14,7 +14,7 @@ public class AuthorCommand implements Command {
         return "/author — выводит информацию об авторах проекта.\nИспользование: /author";
     }
     @Override
-    public String execute(String args, long userId) {
+    public String execute(MessageContext context) {
         return "📚 Study Bot\nАвторы проекта:\n"
                 + "— [Дмитрий Кондратьев] — разработчик\n"
                 + "— [Ашихмин Егор] — разработчик\n\n"

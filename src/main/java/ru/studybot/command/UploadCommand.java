@@ -25,7 +25,8 @@ public class UploadCommand implements Command {
     }
 
     @Override
-    public String execute(String args, long userId) {
+    public String execute(MessageContext context) {
+        String args = context.args(); // Извлекаем аргументы из контекста
         if (args == null || args.trim().isEmpty()) {
             return "Ошибка: укажите данные в формате: Название книги | Тема | Текст";
         }

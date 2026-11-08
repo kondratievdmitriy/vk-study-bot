@@ -1,14 +1,5 @@
 package ru.studybot.platform.vk;
-/**
- * Базовый интерфейс для платформ, с которыми может работать бот.
- * <p>
- * Этот интерфейс позволяет абстрагировать ядро бота (класс Bot) 
- * от конкретной социальной сети или мессенджера. 
- * Благодаря этому, в будущем можно будет легко добавить поддержку 
- * другой платформы (например, Telegram), просто создав новый класс, 
- * реализующий этот интерфейс, без изменения логики самого бота.
- * </p>
- */
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import ru.studybot.bot.Bot;
@@ -21,10 +12,22 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+/**
+ * Базовый интерфейс для платформ, с которыми может работать бот.
+ * <p>
+ * Этот интерфейс позволяет абстрагировать ядро бота (класс Bot) 
+ * от конкретной социальной сети или мессенджера. 
+ * Благодаря этому, в будущем можно будет легко добавить поддержку 
+ * другой платформы (например, Telegram), просто создав новый класс, 
+ * реализующий этот интерфейс, без изменения логики самого бота.
+ * </p>
+ */
 public class VKPlatform implements Platform {
     private static final Logger LOG = Logger.getLogger(VKPlatform.class.getName());
     private static final String API_BASE = "https://api.vk.com/method/";
@@ -149,12 +152,28 @@ public class VKPlatform implements Platform {
                 long peerId = message.path("peer_id").asLong();
                 String text = message.path("text").asText();
 
+                // === НОВОЕ: Извлекаем вложения (файлы/документы) из сообщения ===
+                List<String> attachmentUrls = new ArrayList<>();
+                JsonNode attachments = message.path("attachments");
+                if (attachments.isArray()) {
+                    for (JsonNode att : attachments) {
+                        // Ищем именно документы (doc), так как они содержат прямую ссылку на скачивание
+                        if ("doc".equals(att.path("type").asText())) {
+                            String urlDoc = att.path("doc").path("url").asText();
+                            if (!urlDoc.isEmpty()) {
+                                attachmentUrls.add(urlDoc);
+                            }
+                        }
+                    }
+                }
+                // ==================================================================
+
                 LOG.info("Получено сообщение от " + peerId + ": " + text);
 
-                String reply = bot.processMessage(text, peerId);
+                // === НОВОЕ: Передаем список URL вложений в Bot ===
+                String reply = bot.processMessage(text, peerId, attachmentUrls);
                 sendMessage(peerId, reply);
             }
         }
     }
 }
-
