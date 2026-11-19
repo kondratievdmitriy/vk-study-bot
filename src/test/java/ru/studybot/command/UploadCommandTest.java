@@ -47,14 +47,22 @@ class UploadCommandTest {
     }
 
     @Test
-    void execute_appendsLessonsToExistingBook() {
-        command.execute(new MessageContext(99999L, "Книга|Глава 1: Начало. Текст первой главы.", List.of()));
-        command.execute(new MessageContext(99999L, "Книга|Глава 2: Продолжение. Текст второй главы.", List.of()));
+    void execute_replacesLessonsOnReupload() {
+        // Регрессия: повторная загрузка книги перезаписывает уроки, а не дублирует их.
+        // Заголовок — на отдельной строке: строка «Глава N: ... Текст...» целиком
+        // совпадает с шаблоном заголовка, и весь текст ушёл бы в тему урока.
+        command.execute(new MessageContext(99999L,
+                "Книга|Глава 1: Начало.\nТекст первой главы.", List.of()));
+        assertEquals(1, bookRepo.findAll().size());
+        assertEquals(1, lessonRepo.findAll().size());
+
+        command.execute(new MessageContext(99999L,
+                "Книга|Глава 2: Продолжение.\nТекст второй главы.", List.of()));
 
         assertEquals(1, bookRepo.findAll().size());
-        assertEquals(2, lessonRepo.findAll().size());
-        assertTrue(lessonRepo.findAll().get(1).getLessonNumber() == 1
-                || lessonRepo.findAll().get(1).getLessonNumber() == 2);
+        assertEquals(1, lessonRepo.findAll().size(), "Старые уроки должны быть удалены");
+        assertEquals("Глава 2: Продолжение.", lessonRepo.findAll().get(0).getTopic());
+        assertEquals(1, lessonRepo.findAll().get(0).getLessonNumber());
     }
 
     @Test
