@@ -1,7 +1,10 @@
 package ru.studybot.command;
 
 import org.junit.jupiter.api.Test;
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
+
 /**
  * Модульные тесты для команды AboutCommand.
  * Проверяют базовые контракты интерфейса Command и корректность 
@@ -22,7 +25,10 @@ class AboutCommandTest {
 
     @Test
     void executeReturnsConceptDescription() {
-        String result = command.execute("", 1L);
+        // ИЗМЕНЕНИЕ: создаем MessageContext вместо передачи двух параметров
+        MessageContext context = new MessageContext(1L, "", List.of());
+        String result = command.execute(context);
+        
         assertTrue(result.contains("Study Bot"));
         assertTrue(result.contains("блоки"));
     }

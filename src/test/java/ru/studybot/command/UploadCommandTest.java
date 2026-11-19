@@ -1,60 +1,87 @@
 package ru.studybot.command;
 
 import org.junit.jupiter.api.Test;
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 import ru.studybot.repository.BookRepository;
 import ru.studybot.repository.LessonRepository;
 import ru.studybot.repository.impl.InMemoryBookRepository;
 import ru.studybot.repository.impl.InMemoryLessonRepository;
+import ru.studybot.splitter.TextSplitter;
 
 class UploadCommandTest {
 
-    @Test
-    void execute_successfullySavesBookAndLesson() {
-        BookRepository bookRepo = new InMemoryBookRepository();
-        LessonRepository lessonRepo = new InMemoryLessonRepository();
-        UploadCommand command = new UploadCommand(bookRepo, lessonRepo);
+    private final BookRepository bookRepo = new InMemoryBookRepository();
+    private final LessonRepository lessonRepo = new InMemoryLessonRepository();
+    private final UploadCommand command =
+            new UploadCommand(bookRepo, lessonRepo, new TextSplitter());
 
-        String args = "Java ООП|Глава 1: Основы|В этой главе мы изучаем основы объектно-ориентированного программирования и принципы инкапсуляции.";
-        String result = command.execute(args, 99999L);
+    @Test
+    void execute_successfullySavesBookAndLessons() {
+        String args = "Java ООП|Основы ООП. Инкапсуляция — это сокрытие деталей реализации. "
+                + "Полиморфизм позволяет переопределять методы.";
+        String result = command.execute(new MessageContext(99999L, args, List.of()));
 
         assertTrue(result.contains("Материал успешно загружен"));
         assertEquals(1, bookRepo.findAll().size());
         assertNotNull(bookRepo.findByTitle("Java ООП"));
+        assertTrue(lessonRepo.findAll().size() >= 1);
+    }
+
+    @Test
+    void execute_splitsTextByChapterHeadings() {
+        String args = "Учебник|"
+                + "Вводный абзац о книге.\n\n"
+                + "Глава 1: Основы\n"
+                + "Текст первой главы с изложением материала основ.\n\n"
+                + "Глава 2: Продвинутые темы\n"
+                + "Текст второй главы с более сложным материалом.";
+        String result = command.execute(new MessageContext(99999L, args, List.of()));
+
+        assertTrue(result.contains("Материал успешно загружен"));
+        assertEquals(2, lessonRepo.findAll().size());
+        assertEquals("Глава 1: Основы", lessonRepo.findAll().get(0).getTopic());
+        assertEquals(1, lessonRepo.findAll().get(0).getLessonNumber());
+        assertEquals(2, lessonRepo.findAll().get(1).getLessonNumber());
+    }
+
+    @Test
+    void execute_replacesLessonsOnReupload() {
+        // Регрессия: повторная загрузка книги перезаписывает уроки, а не дублирует их.
+        // Заголовок — на отдельной строке: строка «Глава N: ... Текст...» целиком
+        // совпадает с шаблоном заголовка, и весь текст ушёл бы в тему урока.
+        command.execute(new MessageContext(99999L,
+                "Книга|Глава 1: Начало.\nТекст первой главы.", List.of()));
+        assertEquals(1, bookRepo.findAll().size());
         assertEquals(1, lessonRepo.findAll().size());
+
+        command.execute(new MessageContext(99999L,
+                "Книга|Глава 2: Продолжение.\nТекст второй главы.", List.of()));
+
+        assertEquals(1, bookRepo.findAll().size());
+        assertEquals(1, lessonRepo.findAll().size(), "Старые уроки должны быть удалены");
+        assertEquals("Глава 2: Продолжение.", lessonRepo.findAll().get(0).getTopic());
+        assertEquals(1, lessonRepo.findAll().get(0).getLessonNumber());
     }
 
     @Test
     void execute_handlesInvalidFormat() {
-        BookRepository bookRepo = new InMemoryBookRepository();
-        LessonRepository lessonRepo = new InMemoryLessonRepository();
-        UploadCommand command = new UploadCommand(bookRepo, lessonRepo);
-
-        String result = command.execute("Только название", 99999L);
+        String result = command.execute(new MessageContext(99999L, "Только название без разделителя", List.of()));
         assertTrue(result.contains("Ошибка: неверный формат"));
     }
 
     @Test
-    void execute_doesNotCreateDuplicateBooks() {
-        BookRepository bookRepo = new InMemoryBookRepository();
-        LessonRepository lessonRepo = new InMemoryLessonRepository();
-        UploadCommand command = new UploadCommand(bookRepo, lessonRepo);
-
-        command.execute("Java ООП|Глава 1|Текст 1", 99999L);
-        command.execute("Java ООП|Глава 2|Текст 2", 99999L);
-
-        assertEquals(1, bookRepo.findAll().size());
-        assertEquals(2, lessonRepo.findAll().size());
+    void execute_returnsErrorOnEmptyArgs() {
+        String result = command.execute(new MessageContext(99999L, "", List.of()));
+        assertTrue(result.contains("Использование"));
     }
 
     @Test
-    void execute_returnsErrorOnEmptyArgs() {
-        BookRepository bookRepo = new InMemoryBookRepository();
-        LessonRepository lessonRepo = new InMemoryLessonRepository();
-        UploadCommand command = new UploadCommand(bookRepo, lessonRepo);
-
-        String result = command.execute("", 99999L);
-        assertTrue(result.contains("Ошибка: укажите данные"));
+    void execute_withFakeAttachmentReturnsErrorMessage() {
+        // localhost:1 — соединение отклоняется мгновенно, без ожидания
+        MessageContext context = new MessageContext(99999L, "Книга", List.of("http://localhost:1/file.pdf"));
+        String result = command.execute(context);
+        assertTrue(result.contains("Не удалось"));
     }
 }
-

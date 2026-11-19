@@ -35,7 +35,7 @@ public class Main {
         registry.register(new AuthorCommand());
         registry.register(new AboutCommand());
         registry.register(new HelpCommand(registry));
-        registry.register(new UploadCommand(bookRepo, lessonRepo)); // <-- твоя новая команда
+        registry.register(new UploadCommand(bookRepo, lessonRepo)); // <-- новая команда
 
         Bot bot = new Bot(registry);
         VKPlatform platform = new VKPlatform(token, groupId, bot);

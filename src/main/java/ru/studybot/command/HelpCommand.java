@@ -24,7 +24,8 @@ public class HelpCommand implements Command {
                 + "Пример: /help author";
     }
     @Override
-    public String execute(String args, long userId) {
+    public String execute(MessageContext context) {
+        String args = context.args(); // Извлекаем аргументы из контекста
         if (args == null || args.isBlank()) {
             return formatAllCommands();
         }
