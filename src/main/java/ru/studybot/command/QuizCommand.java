@@ -116,9 +116,12 @@ public class QuizCommand implements Command {
             }
             sb.append("\n");
         }
+        // ФИКС: раньше подсказка предлагала несуществующий формат
+        // «/submit 1-й урок: ...» — пользователь копировал её и получал ошибку парсинга.
         sb.append("Ответьте одной командой:\n")
-                .append("/submit ").append(lesson.getLessonNumber()).append("-й урок: <ответы через ;>\n")
-                .append("Полный формат: /submit <название книги> <номер урока> | 2; 1; 3; ваш краткий ответ");
+                .append("/submit <название книги> ").append(lesson.getLessonNumber())
+                .append(" | <ответы через ;>\n")
+                .append("Для вопросов с вариантами — номер варианта; для кратких — свободный текст.");
         return sb.toString();
     }
 

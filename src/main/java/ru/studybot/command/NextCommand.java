@@ -13,14 +13,12 @@ import java.util.List;
 /**
  * Команда /next — переход к следующему уроку или возврат к повторению.
  * <p>
- * Реализует Задачу 3, пункт 4: "Корректировать план: возврат к повторению 
+ * Реализует Задачу 3, пункт 4: "Корректировать план: возврат к повторению
  * или переход к следующему блоку".
  * </p>
  * <p>
- * ИНТЕГРАЦИЯ С НАПАРНИКОМ:
- * Команда читает поле {@code lastLessonStatus} из {@link UserProgress}.
- * Это поле должно обновляться напарником после выполнения команды /submit 
- * (когда его сервис оценки вернет объект LessonScore).
+ * Статус последнего теста ({@code lastLessonStatus}) записывается в
+ * {@link UserProgress} командой /submit после оценки ответов.
  * </p>
  */
 public class NextCommand implements Command {
@@ -64,9 +62,9 @@ public class NextCommand implements Command {
             return "🎉 Вы уже полностью прошли эту книгу! Можете начать новую: /learn <название>.";
         }
 
-        // 2. ПРОВЕРКА СТАТУСА ТЕСТА (Точка интеграции с напарником)
+        // 2. ПРОВЕРКА СТАТУСА ТЕСТА
         LessonScore.Status lastStatus = progress.getLastLessonStatus();
-        
+
         if (lastStatus == null) {
             return "⚠️ Вы ещё не прошли тест по текущему уроку. Сначала напишите /quiz, а затем /submit.";
         }
@@ -76,19 +74,19 @@ public class NextCommand implements Command {
             // Тест провален — заставляем повторить урок
             progress.markAsRepeating();
             progressRepo.save(progress);
-            
+
             return "❌ Тест не сдан (" + getPercentHint(lastStatus) + "%). Урок не засчитан.\n" +
                    "Пожалуйста, перечитайте материал и попробуйте снова.\n" +
                    "Используйте /learn, чтобы вернуться к уроку, или /quiz, чтобы пройти тест заново.";
         }
 
         // Если PASSED или CONDITIONALLY_PASSED — переходим дальше
-        // (Напарник может добавить вывод разбора ошибок для CONDITIONALLY_PASSED, но переход разрешен)
+        // (разбор ошибок уже показан в /submit при условном зачёте)
 
         // 4. ПОИСК СЛЕДУЮЩЕГО УРОКА
         int nextLessonNumber = progress.getCurrentLessonNumber() + 1;
         List<Lesson> lessons = lessonRepo.findByBookId(progress.getBookId());
-        
+
         Lesson nextLesson = lessons.stream()
                 .filter(l -> l.getLessonNumber() == nextLessonNumber)
                 .findFirst()
@@ -99,8 +97,9 @@ public class NextCommand implements Command {
             // Уроков больше нет — книга пройдена
             progress.markAsDone();
             progressRepo.save(progress);
+            // ФИКС: раньше здесь обещалась команда /status, которой не существует
             return "🎉 Поздравляем! Вы успешно завершили изучение книги!\n" +
-                   "Используйте /status, чтобы посмотреть свою статистику, или /learn <новая книга>, чтобы начать новый курс.";
+                   "Начните новую: /learn <название книги>.";
         }
 
         // Переход к следующему уроку
@@ -133,12 +132,12 @@ public class NextCommand implements Command {
         sb.append(lesson.getContent()).append("\n\n");
         sb.append("────────────────────\n");
         sb.append("💡 Изучите материал. Когда будете готовы, напишите /quiz");
-        
+
         return sb.toString();
     }
 
     /**
-     * Вспомогательный метод для красивого вывода процентов (опционально).
+     * Вспомогательный метод для красивого вывода процентов.
      */
     private String getPercentHint(LessonScore.Status status) {
         if (status == LessonScore.Status.FAILED) return "< 60";

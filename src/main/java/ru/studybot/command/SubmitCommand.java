@@ -5,11 +5,13 @@ import ru.studybot.model.Lesson;
 import ru.studybot.model.LessonScore;
 import ru.studybot.model.Question;
 import ru.studybot.model.QuestionResult;
+import ru.studybot.model.UserProgress;
 import ru.studybot.quiz.AnswerEvaluator;
 import ru.studybot.quiz.QuestionCodec;
 import ru.studybot.quiz.QuestionGenerator;
 import ru.studybot.repository.BookRepository;
 import ru.studybot.repository.LessonRepository;
+import ru.studybot.repository.UserProgressRepository;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -21,22 +23,31 @@ import java.util.List;
  * Количество ответов должно совпадать с числом вопросов. Ответы выравниваются
  * по номерам вопросов: первый элемент — на вопрос 1 и т. д.
  * </p>
+ * <p>
+ * После оценки результат записывается в прогресс пользователя
+ * ({@code lastLessonStatus} в {@link UserProgress}) — его читает
+ * {@link NextCommand}, чтобы решить: пускать дальше или возвращать к повторению.
+ * </p>
  */
 public class SubmitCommand implements Command {
 
     private final BookRepository bookRepo;
     private final LessonRepository lessonRepo;
+    private final UserProgressRepository progressRepo;
     private final AnswerEvaluator evaluator;
     private final QuestionGenerator generator;
 
-    public SubmitCommand(BookRepository bookRepo, LessonRepository lessonRepo) {
-        this(bookRepo, lessonRepo, new AnswerEvaluator(), new QuestionGenerator());
+    public SubmitCommand(BookRepository bookRepo, LessonRepository lessonRepo,
+                         UserProgressRepository progressRepo) {
+        this(bookRepo, lessonRepo, progressRepo, new AnswerEvaluator(), new QuestionGenerator());
     }
 
     public SubmitCommand(BookRepository bookRepo, LessonRepository lessonRepo,
+                         UserProgressRepository progressRepo,
                          AnswerEvaluator evaluator, QuestionGenerator generator) {
         this.bookRepo = bookRepo;
         this.lessonRepo = lessonRepo;
+        this.progressRepo = progressRepo;
         this.evaluator = evaluator;
         this.generator = generator;
     }
@@ -105,7 +116,37 @@ public class SubmitCommand implements Command {
             results.add(evaluator.evaluate(questions.get(i), answers.get(i)));
         }
         LessonScore score = evaluator.evaluateLesson(questions, results);
+
+        // ИНТЕГРАЦИЯ С ПЛАНОМ: результат теста попадает в прогресс пользователя,
+        // иначе /next не сможет определить, пустили пользователя дальше или нет.
+        updateProgress(context.peerId(), lesson, score);
+
         return formatResult(lesson, questions, results, score);
+    }
+
+    /**
+     * Записывает результат теста в прогресс пользователя.
+     * <p>
+     * Прогресс привязывается к сданному уроку: если пользователь ещё не начинал
+     * книгу (/learn не вызывался) — прогресс создаётся на этот урок; если изучает
+     * другую книгу — прогресс переключается. Счётчик попыток инкрементируется
+     * для урока, по которому сдан тест. При провале статус меняется на
+     * REPEATING — /next вернёт пользователя к повторению.
+     * </p>
+     */
+    private void updateProgress(long peerId, Lesson lesson, LessonScore score) {
+        UserProgress progress = progressRepo.findByPeerId(peerId);
+        if (progress == null) {
+            progress = new UserProgress(peerId);
+        }
+        progress.setBookId(lesson.getBookId());
+        progress.setCurrentLessonNumber(lesson.getLessonNumber());
+        progress.setStatus(score.getStatus() == LessonScore.Status.FAILED
+                ? UserProgress.Status.REPEATING
+                : UserProgress.Status.STUDYING);
+        progress.setLastLessonStatus(score.getStatus());
+        progress.incrementAttempts();
+        progressRepo.save(progress);
     }
 
     private String formatResult(Lesson lesson, List<Question> questions,
