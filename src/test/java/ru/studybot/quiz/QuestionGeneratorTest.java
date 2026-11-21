@@ -46,17 +46,44 @@ class QuestionGeneratorTest {
     }
 
     @Test
-    void trueFalseAlternatesTrueAndFalse() {
-        Lesson lesson = new Lesson("b1", 1, "Глава 1", BLOCK);
+    void trueFalseUsesFullSentenceAndNegationForFalse() {
+        String block = """
+                RLE — это базовый алгоритм сжатия данных.
+                Инкапсуляция является фундаментальным принципом объектно-ориентированного программирования.
+                """;
+        Lesson lesson = new Lesson("b1", 1, "Глава 1", block);
         List<Question> questions = generator.generate(lesson, List.of(lesson));
-        List<Question> tfQuestions = questions.stream()
+        List<Question> tf = questions.stream()
                 .filter(q -> q.getType() == QuestionType.TRUE_FALSE).toList();
-        if (tfQuestions.size() >= 2) {
-            assertNotEquals(tfQuestions.get(0).getCorrectAnswers(),
-                    tfQuestions.get(1).getCorrectAnswers(),
-                    "Вопросы верно/неверно должны чередоваться, чтобы нельзя было отвечать всегда одинаково");
-        }
+
+        assertEquals(2, tf.size());
+        // Истинный: предложение целиком, без подмены предиката обрывком
+        assertTrue(tf.get(0).getText().startsWith("RLE — это базовый алгоритм"));
+        assertEquals("Верно", tf.get(0).getCorrectAnswers().get(0));
+        // Ложный: отрицание у связки, а не обрывок-дистрактор
+        assertTrue(tf.get(1).getText().contains("не является"));
+        assertEquals("Неверно", tf.get(1).getCorrectAnswers().get(0));
     }
+
+    @Test
+    void duplicatedTermInSubjectIsCollapsed() {
+        // Регрессия: термин отдельной строкой (артефакт PDF) склеивался со следующим
+        // предложением и дублировался в вопросах: «что такое X X?»
+        String block = """
+                Jump-кодирование
+                Jump-кодирование — это вариация RLE, кодирующая неповторяющиеся последовательности.
+                """;
+        Lesson lesson = new Lesson("b1", 1, "Глава 1", block);
+        List<Question> questions = generator.generate(lesson, List.of(lesson));
+
+        assertFalse(questions.isEmpty());
+        Question shortAnswer = questions.stream()
+                .filter(q -> q.getType() == QuestionType.SHORT_ANSWER).findFirst().orElseThrow();
+        assertTrue(shortAnswer.getText().contains("что такое Jump-кодирование?"),
+                "Повторяющийся термин должен быть схлопнут: " + shortAnswer.getText());
+        assertFalse(shortAnswer.getText().contains("Jump-кодирование Jump-кодирование"));
+    }
+
 
     @Test
     void generatedQuestionsSurviveJsonRoundTrip() {

@@ -17,17 +17,17 @@ import java.util.regex.Pattern;
  * Генератор проверочных вопросов по уроку на основе шаблонов.
  * <p>
  * Целевой состав теста на блок: 1 краткий ответ + 1 выбор варианта +
- * 2 верно/неверно (максимум 5 баллов). Если материала мало — генерируется
- * сколько есть, но не менее 2 вопросов; из совсем короткого текста вопросы
- * не генерируются вовсе.
+ * до 2 верно/неверно. Если материала мало — генерируется сколько есть;
+ * из совсем короткого текста вопросы не генерируются вовсе.
  * </p>
  * <p>
  * Источники:
  * - краткий ответ и выбор варианта строятся из предложений-определений
  *   («X — это Y», «X называется Y», «X является Y»);
- * - верно/неверно — из тех же определений: чётные вопросы «истинные»,
- *   нечётные подменяют предикат дистрактором («X — это Z», где Z — термин
- *   из другого урока), чтобы нельзя было всегда отвечать «Верно».
+ * - верно/неверно цитирует предложение целиком: чётные вопросы — исходные
+ *   (правильный ответ «Верно»), нечётные — с отрицанием у связки
+ *   («X — это не Y», «X не является Y»), правильный ответ «Неверно».
+ *   Это удерживает пользователя от ответа «Верно» на автомате.
  * </p>
  */
 public class QuestionGenerator {
@@ -41,6 +41,8 @@ public class QuestionGenerator {
     private static final List<String> TRUE_FALSE_OPTIONS = List.of("Верно", "Неверно");
     private static final int REQUIRED_DISTRACTORS = 3;
     private static final int MAX_TRUE_FALSE = 2;
+    /** Дистрактор короче этого значения («Это», «Что») выглядит мусором. */
+    private static final int MIN_DISTRACTOR_LENGTH = 4;
 
     /**
      * Генерирует вопросы по уроку. Результат детерминирован
@@ -69,38 +71,41 @@ public class QuestionGenerator {
         String[] definition = findDefinition(sentences);
 
         if (definition != null) {
+            String subject = cleanSubject(definition[0]);
+
             // Краткий ответ
             result.add(new Question(number++, QuestionType.SHORT_ANSWER,
-                    "Кратко: что такое " + definition[0] + "?",
+                    "Кратко: что такое " + subject + "?",
                     List.of(),
                     List.of(capitalize(definition[1])),
                     KeywordExtractor.terms(definition[1])));
 
-            // Выбор варианта: те же 4 опоры, что у краткого ответа, плюс дистракторы
+            // Выбор варианта: правильный ответ + 3 дистрактора
             List<String> options = buildOptions(definition[1], distractorPool);
             if (options.size() == 1 + REQUIRED_DISTRACTORS) {
                 result.add(new Question(number++, QuestionType.MULTIPLE_CHOICE,
-                        "Что такое " + definition[0] + "?",
+                        "Что такое " + subject + "?",
                         options,
                         List.of(definition[1]),
                         List.of()));
             }
 
-            // Верно/неверно по найденным определениям
+            // Верно/неверно: предложение цитируется целиком, ложные — с отрицанием
             int tfCount = 0;
             for (SupportSentenceFinder.ScoredSentence s : sentences) {
                 if (tfCount >= MAX_TRUE_FALSE) break;
                 String[] def = parseDefinition(s.text());
                 if (def == null) continue;
                 boolean makeFalse = (tfCount % 2 == 1);
-                String predicate = def[1];
+                String statement;
                 if (makeFalse) {
-                    String distractor = pickDistractor(distractorPool, List.of(def[1]));
-                    if (distractor == null) continue;
-                    predicate = distractor;
+                    statement = negate(s.text());
+                    if (statement == null) continue; // не смогли построить отрицание — пропускаем
+                } else {
+                    statement = s.text();
                 }
                 result.add(new Question(number++, QuestionType.TRUE_FALSE,
-                        def[0] + " — это " + predicate + ". Верно ли это утверждение?",
+                        statement + " Верно ли это утверждение?",
                         TRUE_FALSE_OPTIONS,
                         List.of(makeFalse ? "Неверно" : "Верно"),
                         List.of()));
@@ -132,6 +137,37 @@ public class QuestionGenerator {
         return null;
     }
 
+    /**
+     * Схлопывает повторяющиеся подряд слова в субъекте определения.
+     * <p>
+     * «Jump-кодирование Jump-кодирование — это …» возникает, когда термин
+     * стоит отдельной строкой (артефакт извлечения из PDF) и склеивается
+     * со следующим предложением. Регулярка делает «X X» -> «X», включая
+     * слова через дефис. Регистр не учитывается.
+     * </p>
+     */
+    static String cleanSubject(String subject) {
+        return subject.replaceAll("(?iu)([а-яёa-z][а-яёa-z-]*)(?:\\s+\\1)+", "$1");
+    }
+
+    /**
+     * Строит ложное утверждение из исходного: отрицание добавляется к связке
+     * определения («— это» -> «— это не», «является» -> «не является»).
+     * Возвращает null, если предложение не является распознаваемым определением.
+     */
+    String negate(String sentence) {
+        String s = sentence.strip();
+        if (DEF_DASH.matcher(s).matches()) {
+            return s.replaceFirst("(?i)—\\s*это", "— это не");
+        }
+        for (Pattern p : List.of(DEF_NAMED, DEF_IS)) {
+            if (p.matcher(s).matches()) {
+                return s.replaceFirst("(?i)(называется|является|представляет\\s+собой)", "не $1");
+            }
+        }
+        return null;
+    }
+
     /** Пул дистракторов: ключевые слова других уроков + прочие слова текущего блока. */
     private List<String> collectDistractors(List<Lesson> allLessons, Lesson current, List<String> currentKeywords) {
         LinkedHashSet<String> pool = new LinkedHashSet<>();
@@ -150,30 +186,12 @@ public class QuestionGenerator {
         return new ArrayList<>(pool);
     }
 
-    /** Первый дистрактор, не пересекающийся с исключениями (по вхождению подстроки). */
-    private String pickDistractor(List<String> pool, List<String> excluded) {
-        for (String d : pool) {
-            boolean conflicts = false;
-            for (String e : excluded) {
-                String dl = d.toLowerCase();
-                String el = e.toLowerCase();
-                if (el.contains(dl) || dl.contains(el)) {
-                    conflicts = true;
-                    break;
-                }
-            }
-            if (!conflicts) {
-                return capitalize(d);
-            }
-        }
-        return null;
-    }
-
     /** 4 варианта: правильный + 3 дистрактора. Позиция правильного сдвигается детерминированно. */
     private List<String> buildOptions(String correct, List<String> pool) {
         List<String> distractors = new ArrayList<>();
         for (String d : pool) {
             if (distractors.size() >= REQUIRED_DISTRACTORS) break;
+            if (d.length() < MIN_DISTRACTOR_LENGTH) continue;
             String dl = d.toLowerCase();
             String cl = correct.toLowerCase();
             if (!cl.contains(dl) && !dl.contains(cl)) {

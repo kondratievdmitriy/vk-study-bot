@@ -5,6 +5,7 @@ import ru.studybot.model.Lesson;
 import ru.studybot.model.LessonScore;
 import ru.studybot.model.Question;
 import ru.studybot.model.QuestionResult;
+import ru.studybot.model.QuestionType;
 import ru.studybot.model.UserProgress;
 import ru.studybot.quiz.AnswerEvaluator;
 import ru.studybot.quiz.QuestionCodec;
@@ -97,7 +98,6 @@ public class SubmitCommand implements Command {
             if (questions.isEmpty()) {
                 return "⚠️ По этому уроку не удалось составить вопросы. "
                         + "Генератор ищет определения вида «X — это Y» — возможно, в тексте их нет.";
-
             }
             lesson.setQuestions(QuestionCodec.toJson(questions));
             lessonRepo.save(lesson);
@@ -166,7 +166,15 @@ public class SubmitCommand implements Command {
             }
         }
         sb.append("\nИтог: ").append(score.getTotalScore()).append(" из ").append(score.getMaxTotalScore())
-                .append(" (").append(score.percent()).append("%)\n\n");
+                .append(" б. (").append(score.percent()).append("%)\n");
+        // Пояснение весов: краткий ответ даёт 2 балла, остальные — по 1,
+        // поэтому «из N» может не совпадать с числом вопросов.
+        boolean hasShortAnswer = questions.stream()
+                .anyMatch(q -> q.getType() == QuestionType.SHORT_ANSWER);
+        if (hasShortAnswer) {
+            sb.append("(Краткий ответ оценивается в 2 балла, вопросы с вариантами — в 1.)\n");
+        }
+        sb.append("\n");
 
         switch (score.getStatus()) {
             case PASSED -> sb.append("🎉 Урок засчитан! Переходите к следующему блоку: /next.");
