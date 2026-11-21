@@ -95,5 +95,8 @@ class NextCommandTest {
             Lesson l2 = new Lesson("book_1", 2, "Переменные", "Текст второго урока.");
             return List.of(l1, l2);
         }
+        @Override public void deleteByBookId(String bookId) {
+            // заглушка: в этих тестах удаление уроков не используется
+        }
     }
 }
