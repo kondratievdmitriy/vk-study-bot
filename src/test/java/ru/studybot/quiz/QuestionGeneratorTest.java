@@ -129,21 +129,17 @@ class QuestionGeneratorTest {
         Lesson lesson = new Lesson("b1", 1, "Глава 1", block);
         List<Question> questions = generator.generate(lesson, List.of(lesson));
 
-        // Ни в одном вопросе не должно быть служебного вступления «Вывод:»
         assertFalse(questions.isEmpty());
         for (Question q : questions) {
             assertFalse(q.getText().contains("Вывод"),
                     "Служебное вступление должно срезаться: " + q.getText());
         }
 
-        // Отрицание перечисления «или» — детерминированно через negate()
         String negated = generator.negate(
                 "Виртуальная машина (ВМ) — это программная или аппаратная среда, эмулирующая работу физического компьютера.");
         assertTrue(negated.contains("не программная и не аппаратная"),
                 "Перечисление под отрицанием должно разворачиваться в «и не»: " + negated);
 
-        // Чистка субъекта: вступление и хвостовая запятая (инварианты вместо
-        // точного сравнения строк — защита от невидимых символов в копипасте)
         String cleaned = QuestionGenerator.cleanSubject(
                 "Вывод: Виртуальная машина, построенная на принципах фон Неймана,");
         assertFalse(cleaned.startsWith("Вывод"), "Вступление должно срезаться: " + cleaned);
@@ -151,7 +147,6 @@ class QuestionGeneratorTest {
                 "Хвостовая пунктуация должна срезаться: " + cleaned);
         assertTrue(cleaned.startsWith("Виртуальная машина"), "Субъект сохраняется: " + cleaned);
 
-        // Ни один «ложный» вопрос не содержит неразвёрнутое «не X или Y»
         List<Question> tfFalse = questions.stream()
                 .filter(q -> q.getType() == QuestionType.TRUE_FALSE
                         && q.getCorrectAnswers().contains("Неверно")).toList();
@@ -162,9 +157,88 @@ class QuestionGeneratorTest {
     }
 
     @Test
+    void collapseRepeatedRespectsWordBoundaries() {
+        // Регрессия: схлопывание повторов без границ слова превращало
+        // «фон Неймана» в «фонеймана» (н + Н сворачивались как дубль).
+        assertEquals("фон Неймана", QuestionGenerator.cleanSubject("фон Неймана"));
+        // Хвостовая пунктуация срезается cleanSubject по его контракту,
+        // поэтому вход с запятой даёт строку без неё.
+        assertEquals("фон Неймана", QuestionGenerator.cleanSubject("фон Неймана,"));
+        assertEquals("Jump-кодирование", QuestionGenerator.cleanSubject("Jump-кодирование Jump-кодирование"));
+    }
+
+    @Test
+    void colonDefinitionsBecomeQuestions() {
+        // Новое поведение: определения через двоеточие («Принцип адресности: …»),
+        // типичные для пунктов списков в учебных PDF, распознаются и порождают вопросы.
+        String block = """
+                Принцип однородности памяти: программы и данные хранятся в одной и той же памяти.
+                Принцип адресности: память состоит из пронумерованных ячеек.
+                """;
+        Lesson lesson = new Lesson("b1", 1, "Глава 1", block);
+        List<Question> questions = generator.generate(lesson, List.of(lesson));
+
+        assertFalse(questions.isEmpty());
+        assertTrue(questions.stream().anyMatch(q -> q.getType() == QuestionType.SHORT_ANSWER
+                        && q.getText().contains("что такое Принцип")),
+                "Краткий ответ должен строиться по определению с двоеточием");
+        assertTrue(questions.stream().anyMatch(q -> q.getType() == QuestionType.TRUE_FALSE),
+                "Определения с двоеточием должны пополнять запас верно/неверно");
+    }
+
+    @Test
+    void numberedListItemsAreNotDefinitions() {
+        // Списочные обрывки «X: 1. …» не должны превращаться в вопросы
+        // с мусорным предикатом.
+        String block = """
+                Пример работы ВМ: 1. Гостевая ОС загружает программу в виртуальную память.
+                Виртуальная машина — это программная среда, эмулирующая работу компьютера.
+                """;
+        Lesson lesson = new Lesson("b1", 1, "Глава 1", block);
+        List<Question> questions = generator.generate(lesson, List.of(lesson));
+
+        assertFalse(questions.isEmpty());
+        assertTrue(questions.stream().noneMatch(q -> q.getText().contains("1. Гостевая")),
+                "Нумерованный список не должен попадать в предикаты вопросов");
+    }
+
+    @Test
+    void trueFalsePrefersUnusedSentences() {
+        // Регрессия: при достатке определений верно/неверно не должно
+        // переиспользовать предложения краткого ответа и выбора варианта.
+        String block = """
+                RLE — это алгоритм сжатия данных без потерь.
+                Хаффман — это алгоритм оптимального префиксного кодирования.
+                Словарь методов LZ77: повторяющиеся фрагменты заменяются ссылками на ранее встреченные данные.
+                Степень сжатия: отношение размера исходных данных к размеру сжатых данных.
+                """;
+        Lesson lesson = new Lesson("b1", 1, "Глава 1", block);
+        List<Question> questions = generator.generate(lesson, List.of(lesson));
+
+        Question shortQ = questions.stream()
+                .filter(q -> q.getType() == QuestionType.SHORT_ANSWER).findFirst().orElseThrow();
+        Question choiceQ = questions.stream()
+                .filter(q -> q.getType() == QuestionType.MULTIPLE_CHOICE).findFirst().orElseThrow();
+        String shortSubject = subjectAfter(shortQ.getText());
+        String choiceSubject = subjectAfter(choiceQ.getText());
+
+        List<Question> tf = questions.stream()
+                .filter(q -> q.getType() == QuestionType.TRUE_FALSE).toList();
+        assertEquals(2, tf.size(), "При достатке определений должно быть 2 вопроса верно/неверно");
+        for (Question q : tf) {
+            String statement = q.getText()
+                    .replace(" Верно ли это утверждение?", "")
+                    .replace("Неверно, что ", "");
+            assertFalse(statement.contains(shortSubject),
+                    "Верно/неверно не должно переиспользовать предложение краткого ответа: " + q.getText());
+            assertFalse(statement.contains(choiceSubject),
+                    "Верно/неверно не должно переиспользовать предложение выбора варианта: " + q.getText());
+        }
+    }
+
+    @Test
     void normalizeSpacesReplacesNbspAnywhere() {
-        // Диагностика: normalizeSpaces проверяется напрямую. NBSP заменяется
-        // обычным пробелом в любом месте строки, а не только по краям.
+        // NBSP заменяется обычным пробелом в любом месте строки, а не только по краям.
         assertEquals("a b", QuestionGenerator.normalizeSpaces("a\u00A0b"),
                 "Ожидалось «a b», получено: " + toCodePoints(QuestionGenerator.normalizeSpaces("a\u00A0b")));
         assertEquals("фон Неймана", QuestionGenerator.normalizeSpaces("фон\u00A0Неймана"),
@@ -183,7 +257,6 @@ class QuestionGeneratorTest {
         String content = "Вывод:\u00A0" + expectedSubject.replace("фон Неймана", "фон\u00A0Неймана")
                 + ", — это логическое продолжение классической архитектуры.\n"
                 + "Виртуальная машина (ВМ) — это программная среда, эмулирующая работу физического компьютера.\n";
-
         Lesson lesson = new Lesson("b1", 1, "Глава 1", content);
         List<Question> questions = generator.generate(lesson, List.of(lesson));
 
@@ -205,8 +278,6 @@ class QuestionGeneratorTest {
     @Test
     void definitionsBrokenByPdfLineBreaksAreStillFound() {
         // Регрессия: PDF извлекает текст с жёсткими переносами внутри предложений.
-        // Регулярки определений (`.` не матчит \n) не находили ни одного
-        // определения, и /quiz отвечал «текст слишком короткий».
         String wrapped = """
                 RLE (Run-Length Encoding) — это алгоритм сжатия данных,
                 который кодирует повторяющиеся символы.
@@ -254,15 +325,5 @@ class QuestionGeneratorTest {
             sb.append(String.format("U+%04X ", s.codePointAt(i)));
         }
         return sb.append("]").toString();
-    }
-    @Test
-    void collapseRepeatedRespectsWordBoundaries() {
-        // Регрессия: схлопывание повторов без границ слова превращало
-        // «фон Неймана» в «фонеймана» (н + Н сворачивались как дубль).
-        assertEquals("фон Неймана", QuestionGenerator.cleanSubject("фон Неймана"));
-        // Хвостовая пунктуация срезается cleanSubject по его контракту,
-        // поэтому вход с запятой даёт строку без неё.
-        assertEquals("фон Неймана", QuestionGenerator.cleanSubject("фон Неймана,"));
-        assertEquals("Jump-кодирование", QuestionGenerator.cleanSubject("Jump-кодирование Jump-кодирование"));
     }
 }

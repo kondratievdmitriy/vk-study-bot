@@ -21,23 +21,24 @@ import java.util.regex.Pattern;
  * из совсем короткого текста вопросы не генерируются вовсе.
  * </p>
  * <p>
- * Распределение по предложениям: вопросы строятся по разным определениям
- * блока, а не по одному. Краткий ответ — по первому определению, выбор
- * варианта — по следующему с другим субъектом, верно/неверно — по
- * оставшимся предложениям (переиспользование — только если других нет).
+ * Определения распознаются в четырёх формах: «X — это Y», «X называется Y»,
+ * «X является Y» и «X: Y» (пункты списков, типичные для учебных PDF).
+ * Краткий ответ — по первому определению, выбор варианта — по следующему
+ * с другим субъектом, верно/неверно — сначала по неиспользованным
+ * определениям, затем по использованным (запас), при нехватке — по прочим
+ * содержательным предложениям (не заголовки и не обрывки списков).
  * </p>
  * <p>
- * Ложные утверждения верно/неверно строятся отрицанием связки исходного
- * предложения («X — это не Y», «X не является Y»); при перечислении через
- * «или» отрицание грамматически корректно разворачивается в «не X и не Y».
- * Служебные вступления («Вывод:», «Итак,» и т. п.) и хвостовая пунктуация
- * срезаются из субъекта, предиката и утверждений верно/неверно.
+ * Ложные утверждения верно/неверно строятся отрицанием связки определения
+ * («X — это не Y», «X не является Y»); перечисление через «или» под
+ * отрицанием разворачивается в «не X и не Y». Для предложений без распознанной
+ * связки используется обёртка «Неверно, что …».
  * </p>
  * <p>
  * Системная нормализация: контент урока выпрямляется один раз на входе
  * генератора (все Unicode-пробелы — к обычному пробелу, невидимые символы
- * нулевой ширины — удаляются). Ниже по цепочке NBSP физически не встречается.
- * Схлопывание повторов работает только на границах слов.
+ * нулевой ширины — удаляются). Схлопывание повторов работает только
+ * на границах слов.
  * </p>
  */
 public class QuestionGenerator {
@@ -48,11 +49,16 @@ public class QuestionGenerator {
     private static final Pattern DEF_DASH = Pattern.compile("(?i)^(.{3,80}?)\\s+—\\s+это\\s+(.+?)[.?!]?$");
     private static final Pattern DEF_NAMED = Pattern.compile("(?i)^(.{3,80}?)\\s+называется\\s+(.+?)[.?!]?$");
     private static final Pattern DEF_IS = Pattern.compile("(?i)^(.{3,80}?)\\s+является\\s+(.+?)[.?!]?$");
+    /** Определение через двоеточие — типичная форма пунктов списков в учебных PDF. */
+    private static final Pattern DEF_COLON = Pattern.compile("^(.{3,80}?):\\s+(.+?)[.?!]?$");
     private static final List<String> TRUE_FALSE_OPTIONS = List.of("Верно", "Неверно");
     private static final int REQUIRED_DISTRACTORS = 3;
     private static final int MAX_TRUE_FALSE = 2;
     /** Дистрактор короче этого значения («Это», «Что») выглядит мусором. */
     private static final int MIN_DISTRACTOR_LENGTH = 4;
+
+    /** Маркер списка в начале строки: «- », «• », «1. », «1) ». */
+    private static final Pattern LEADING_BULLET = Pattern.compile("^(?:[-•*—]|\\d+[.)])\\s+");
 
     /** Служебные вступления перед субъектом: «Вывод:», «Итак,», «Таким образом,» и т. п. */
     private static final Pattern LEADING_DISCOURSE = Pattern.compile(
@@ -73,7 +79,7 @@ public class QuestionGenerator {
      * Схлопывание повторяющихся подряд слов, только на границах слов.
      * Lookbehind/lookahead по буквам обязательны: без них регулярка
      * матчит одиночную букву ВНУТРИ слова — «фон Неймана» превращалась
-     * в «фонеймана» (н + Н, регистр сворачивается флагом (?iu)).
+     * в «фонеймана» (н + Н сворачивались как дубль).
      */
     private static final Pattern REPEATED_WORD = Pattern.compile(
             "(?iu)(?<![а-яёa-z])([а-яёa-z][а-яёa-z-]*)(?![а-яёa-z])(?:\\s+\\1(?![а-яёa-z]))+");
@@ -146,7 +152,17 @@ public class QuestionGenerator {
             }
         }
         if (choiceDef != null) {
-            List<String> options = buildOptions(choiceDef.predicate(), distractorPool);
+            // Дистракторы: сначала предикаты других определений блока — они
+            // содержательно конкурируют с правильным ответом; затем термины
+            // текущего урока, затем термины других уроков.
+            LinkedHashSet<String> pool = new LinkedHashSet<>();
+            for (Definition d : defs) {
+                if (d != choiceDef) {
+                    pool.add(d.predicate());
+                }
+            }
+            pool.addAll(distractorPool);
+            List<String> options = buildOptions(choiceDef.predicate(), new ArrayList<>(pool));
             if (options.size() == 1 + REQUIRED_DISTRACTORS) {
                 result.add(new Question(number++, QuestionType.MULTIPLE_CHOICE,
                         "Что такое " + choiceDef.subject() + "?",
@@ -156,35 +172,51 @@ public class QuestionGenerator {
             }
         }
 
-        // 4. Верно/неверно: сначала предложения, ещё не использованные в других вопросах,
-        //    затем уже использованные — как запас (иначе тест короче задуманного).
-        Set<String> usedTexts = new HashSet<>();
-        usedTexts.add(first.source().text().toLowerCase());
+        // 4. Верно/неверно: сначала неиспользованные определения, затем
+        //    использованные — как запас; при нехватке определений — прочие
+        //    содержательные предложения (не заголовки, не обрывки списков).
+        Set<String> tfUsed = new HashSet<>();
+        tfUsed.add(first.source().text().toLowerCase());
         if (choiceDef != null) {
-            usedTexts.add(choiceDef.source().text().toLowerCase());
+            tfUsed.add(choiceDef.source().text().toLowerCase());
         }
-        List<Definition> tfOrder = new ArrayList<>();
+        List<SupportSentenceFinder.ScoredSentence> tfSources = new ArrayList<>();
         for (Definition d : defs) {
-            if (!usedTexts.contains(d.source().text().toLowerCase())) {
-                tfOrder.add(d);
+            if (!tfUsed.contains(d.source().text().toLowerCase())) {
+                tfSources.add(d.source());
             }
         }
         for (Definition d : defs) {
-            if (!tfOrder.contains(d)) {
-                tfOrder.add(d);
+            if (!tfSources.contains(d.source())) {
+                tfSources.add(d.source());
             }
         }
+        for (SupportSentenceFinder.ScoredSentence s : sentences) {
+            if (tfSources.contains(s)) continue;
+            String t = s.text().strip();
+            if (parseDefinition(t) != null) continue;         // уже учтено в defs
+            if (t.split("\\s+").length < 5) continue;          // обрывки и заголовки
+            if (t.endsWith(":")) continue;                     // заголовки разделов
+            if (t.matches("(?s).*\\d+\\.\\s.*")) continue;     // склейки нумерованных списков
+            tfSources.add(s);
+        }
+
         int tfCount = 0;
-        for (Definition d : tfOrder) {
+        for (SupportSentenceFinder.ScoredSentence s : tfSources) {
             if (tfCount >= MAX_TRUE_FALSE) break;
+            String source = s.text().strip();
+            // Порядок tfSources уже гарантирует приоритет: сначала неиспользованные
+            // определения, затем использованные (запас), затем прочие предложения.
+            // Повторное использование допустимо — это запасной сценарий тесного блока.
+            String base = stripDiscourse(source);
+            if (base.isBlank()) continue;
             boolean makeFalse = (tfCount % 2 == 1);
-            // База утверждения без служебных вступлений: «Вывод: X — это Y»
-            // в тексте вопроса смотрится мусором.
-            String base = stripDiscourse(d.source().text());
             String statement;
             if (makeFalse) {
                 statement = negate(base);
-                if (statement == null) continue; // не смогли построить отрицание — пропускаем
+                if (statement == null) {
+                    statement = "Неверно, что " + base;
+                }
             } else {
                 statement = base;
             }
@@ -193,6 +225,7 @@ public class QuestionGenerator {
                     TRUE_FALSE_OPTIONS,
                     List.of(makeFalse ? "Неверно" : "Верно"),
                     List.of()));
+            tfUsed.add(source.toLowerCase());
             tfCount++;
         }
         return result;
@@ -200,10 +233,17 @@ public class QuestionGenerator {
 
     /** Разбор определения. Возвращает {субъект, предикат} или null. */
     String[] parseDefinition(String sentence) {
-        for (Pattern p : List.of(DEF_DASH, DEF_NAMED, DEF_IS)) {
-            Matcher m = p.matcher(sentence.strip());
+        String s = LEADING_BULLET.matcher(sentence.strip()).replaceFirst("").strip();
+        for (Pattern p : List.of(DEF_DASH, DEF_NAMED, DEF_IS, DEF_COLON)) {
+            Matcher m = p.matcher(s);
             if (m.matches()) {
-                return new String[]{m.group(1).strip(), m.group(2).strip()};
+                String subject = m.group(1).strip();
+                String predicate = m.group(2).strip();
+                // Списочные обрывки: «X: 1. …» или «X: - …» — не определения
+                if (predicate.matches("\\d.*") || predicate.matches("^[-–—]\\s.*")) {
+                    return null;
+                }
+                return new String[]{subject, predicate};
             }
         }
         return null;
@@ -225,26 +265,24 @@ public class QuestionGenerator {
     }
 
     /**
-     * Срезает служебное вступление («Вывод:», «Итак,» и т. п.) с начала строки.
-     * Используется и при чистке субъекта, и при построении утверждений
-     * верно/неверно — иначе вступление попадает в текст вопроса целиком.
+     * Срезает маркер списка («- », «1. ») и служебное вступление («Вывод:»,
+     * «Итак,» и т. п.) с начала строки. Используется при чистке субъекта и при
+     * построении утверждений верно/неверно.
      */
     static String stripDiscourse(String sentence) {
-        return LEADING_DISCOURSE.matcher(normalizeSpaces(sentence.strip()))
-                .replaceFirst("").strip();
+        String s = LEADING_BULLET.matcher(normalizeSpaces(sentence.strip())).replaceFirst("").strip();
+        return LEADING_DISCOURSE.matcher(s).replaceFirst("").strip();
     }
 
     /**
      * Чистка субъекта определения:
-     * 1) нормализует все Unicode-пробелы и невидимые символы;
-     * 2) срезает служебные вступления («Вывод:», «Итак,»);
-     * 3) схлопывает повторяющиеся подряд слова ТОЛЬКО на границах слов
+     * 1) срезает маркеры списков и служебные вступления;
+     * 2) схлопывает повторяющиеся подряд слова ТОЛЬКО на границах слов
      *    («X X» -> «X» — артефакт PDF; «фон Неймана» не трогает);
-     * 4) убирает хвостовую пунктуацию («…Неймана,» -> «…Неймана»).
+     * 3) убирает хвостовую пунктуацию («…Неймана,» -> «…Неймана»).
      */
     static String cleanSubject(String subject) {
-        String s = normalizeSpaces(subject.strip());
-        s = stripDiscourse(s);
+        String s = stripDiscourse(subject.strip());
         s = REPEATED_WORD.matcher(s).replaceAll("$1");
         s = TRAILING_PUNCT.matcher(s).replaceAll("").strip();
         return s;
@@ -283,20 +321,24 @@ public class QuestionGenerator {
         return negated.replaceFirst("(?iu)не\\s+([^,.;:!?]+?)\\s+или\\s+", "не $1 и не ");
     }
 
-    /** Пул дистракторов: ключевые слова других уроков + прочие слова текущего блока. */
+    /**
+     * Пул дистракторов: сначала термины текущего блока (не ключевые) —
+     * они остаются в теме урока, затем термины других уроков
+     * (межпредметная проверка).
+     */
     private List<String> collectDistractors(List<Lesson> allLessons, Lesson current, List<String> currentKeywords) {
         LinkedHashSet<String> pool = new LinkedHashSet<>();
-        if (allLessons != null) {
-            for (Lesson l : allLessons) {
-                if (l == current) continue;
-                pool.addAll(KeywordExtractor.terms(l.getContent() == null ? "" : normalizeSpaces(l.getContent())));
-            }
-        }
         Set<String> keywordSet = new HashSet<>(currentKeywords);
         String currentContent = current.getContent() == null ? "" : normalizeSpaces(current.getContent());
         for (String term : KeywordExtractor.terms(currentContent)) {
             if (!keywordSet.contains(term)) {
                 pool.add(term);
+            }
+        }
+        if (allLessons != null) {
+            for (Lesson l : allLessons) {
+                if (l == current) continue;
+                pool.addAll(KeywordExtractor.terms(l.getContent() == null ? "" : normalizeSpaces(l.getContent())));
             }
         }
         return new ArrayList<>(pool);
