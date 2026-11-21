@@ -74,4 +74,23 @@ class QuestionGeneratorTest {
         assertTrue(generator.generate(empty, List.of(empty)).isEmpty());
         assertTrue(generator.generate(null, null).isEmpty());
     }
+    @Test
+    void definitionsBrokenByPdfLineBreaksAreStillFound() {
+        // Регрессия: PDF извлекает текст с жёсткими переносами внутри предложений.
+        // Регулярки определений (`.` не матчит \n) не находили ни одного
+        // определения, и /quiz отвечал «текст слишком короткий».
+        String wrapped = """
+                RLE (Run-Length Encoding) — это алгоритм сжатия данных,
+                который кодирует повторяющиеся символы.
+                Escape-кодирование решает проблему разделения данных
+                и управляющей информации.
+                """;
+        Lesson lesson = new Lesson("b1", 1, "Глава 1", wrapped);
+        List<Question> questions = generator.generate(lesson, List.of(lesson));
+
+        assertFalse(questions.isEmpty(), "Переносы строк не должны ломать генерацию вопросов");
+        assertTrue(questions.stream().anyMatch(q -> q.getType() == QuestionType.SHORT_ANSWER),
+                "Определение, разорванное переносом, должно стать вопросом");
+    }
+
 }

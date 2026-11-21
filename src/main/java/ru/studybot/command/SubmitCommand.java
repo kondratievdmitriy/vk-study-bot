@@ -95,7 +95,9 @@ public class SubmitCommand implements Command {
         if (questions.isEmpty()) {
             questions = generator.generate(lesson, lessonRepo.findByBookId(book.getId()));
             if (questions.isEmpty()) {
-                return "⚠️ По этому уроку нет вопросов — текст слишком короткий.";
+                return "⚠️ По этому уроку не удалось составить вопросы. "
+                        + "Генератор ищет определения вида «X — это Y» — возможно, в тексте их нет.";
+
             }
             lesson.setQuestions(QuestionCodec.toJson(questions));
             lessonRepo.save(lesson);
