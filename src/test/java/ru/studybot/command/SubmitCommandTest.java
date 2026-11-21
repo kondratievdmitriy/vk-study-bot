@@ -52,13 +52,19 @@ class SubmitCommandTest {
                 List.of("Верно", "Неверно"),
                 List.of("Верно"), List.of());
 
-        Lesson lesson = new Lesson(book.getId(), 1, "Урок 1", "Содержимое урока.");
-        lesson.setQuestions(QuestionCodec.toJson(List.of(q1, q2)));
-        lessonRepo.save(lesson);
+        Lesson lesson1 = new Lesson(book.getId(), 1, "Урок 1", "Содержимое урока.");
+        lesson1.setQuestions(QuestionCodec.toJson(List.of(q1, q2)));
+        lessonRepo.save(lesson1);
+
+        // Второй урок нужен, чтобы /next после сдачи первого нашёл куда переходить,
+        // а не завершал книгу (это отдельный сценарий — nextWhenLastLesson)
+        Lesson lesson2 = new Lesson(book.getId(), 2, "Урок 2", "Содержимое урока 2.");
+        lessonRepo.save(lesson2);
 
         submitCommand = new SubmitCommand(bookRepo, lessonRepo, progressRepo);
         nextCommand = new NextCommand(bookRepo, lessonRepo, progressRepo);
     }
+
 
     @Test
     void correctAnswers_updateProgressAndOpenNext() {
@@ -119,4 +125,24 @@ class SubmitCommandTest {
         assertNull(progressRepo.findByPeerId(PEER_ID),
                 "При ошибке формата прогресс не должен меняться");
     }
+    @Test
+    void passingLastLesson_marksProgressDone() {
+        // Второй урок — последний в книге: после его сдачи /next завершает изучение
+        Question q1 = new Question(1, QuestionType.MULTIPLE_CHOICE, "Вопрос про второй урок?",
+                List.of("Верный", "Неверный 1", "Неверный 2", "Неверный 3"),
+                List.of("Верный"), List.of());
+        Lesson lesson2 = lessonRepo.findByBookId(bookRepo.findByTitle(TITLE).getId()).stream()
+                .filter(l -> l.getLessonNumber() == 2)
+                .findFirst().orElseThrow();
+        lesson2.setQuestions(QuestionCodec.toJson(List.of(q1)));
+        lessonRepo.save(lesson2);
+
+        submitCommand.execute(new MessageContext(PEER_ID, TITLE + " 2 | 1", List.of()));
+
+        String next = nextCommand.execute(new MessageContext(PEER_ID, "", List.of()));
+        assertTrue(next.contains("успешно завершили"));
+        assertEquals(UserProgress.Status.DONE,
+                progressRepo.findByPeerId(PEER_ID).getStatus());
+    }
+
 }
