@@ -11,6 +11,8 @@ import ru.studybot.splitter.TextSplitter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Команда /upload — единая точка загрузки учебного материала.
@@ -23,6 +25,8 @@ import java.util.List;
  * </p>
  */
 public class UploadCommand implements Command {
+
+    private static final Logger LOG = Logger.getLogger(UploadCommand.class.getName());
 
     private final BookRepository bookRepo;
     private final LessonRepository lessonRepo;
@@ -53,6 +57,7 @@ public class UploadCommand implements Command {
         return "/upload <Название книги> + прикреплённый файл — загрузка из файла (TXT, PDF, DOCX).\n"
                 + "/upload <Название книги> | <Текст> — загрузка текстом.\n"
                 + "Текст автоматически разбивается на блоки-уроки.\n"
+                + "Повторная загрузка книги перезаписывает её уроки.\n"
                 + "Пример: /upload Java ООП | Глава 1: Инкапсуляция — это сокрытие деталей реализации...";
     }
 
@@ -76,6 +81,10 @@ public class UploadCommand implements Command {
         } catch (IllegalArgumentException e) {
             return "❌ Ошибка: " + e.getMessage();
         } catch (Exception e) {
+            // ФИКС: реальная причина ошибки больше не глотается —
+            // без этого стектрейса любая ошибка (включая падение в сплиттере)
+            // выглядела как «файл не читается»
+            LOG.log(Level.WARNING, "Ошибка при обработке файла: " + fileUrl, e);
             return "❌ Не удалось прочитать файл. Убедитесь, что это TXT, PDF или DOCX.";
         }
     }
@@ -94,7 +103,7 @@ public class UploadCommand implements Command {
     }
 
     /** Общая логика: разбиение на уроки и сохранение в репозитории. */
-        private String saveMaterial(String bookTitle, String text) {
+    private String saveMaterial(String bookTitle, String text) {
         Book existing = bookRepo.findByTitle(bookTitle);
         Book book = existing != null ? existing : new Book(bookTitle);
         if (existing == null) {
@@ -106,16 +115,17 @@ public class UploadCommand implements Command {
             return "Ошибка: не удалось извлечь текст материала.";
         }
 
-        int totalLessons = (existing != null ? existing.getTotalLessons() : 0) + lessons.size();
-        book.setTotalLessons(totalLessons);
+        // Повторная загрузка перезаписывает уроки книги, а не добавляет дубликаты.
+        // Старые уроки удаляются, новые нумеруются с 1.
+        lessonRepo.deleteByBookId(book.getId());
         for (Lesson lesson : lessons) {
             lessonRepo.save(lesson);
         }
+        book.setTotalLessons(lessons.size());
 
         return "Материал успешно загружен!\n"
                 + "Книга: " + bookTitle + "\n"
-                + "Новых уроков: " + lessons.size() + "\n"
-                + "Всего уроков в книге: " + totalLessons + "\n"
+                + "Уроков: " + lessons.size() + "\n"
                 + "Номера уроков: " + lessons.get(0).getLessonNumber()
                 + "–" + lessons.get(lessons.size() - 1).getLessonNumber();
     }
@@ -131,4 +141,3 @@ public class UploadCommand implements Command {
         return dot != -1 ? name.substring(0, dot) : name;
     }
 }
-

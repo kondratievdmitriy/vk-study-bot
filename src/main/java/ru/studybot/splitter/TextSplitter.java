@@ -11,11 +11,14 @@ import java.util.regex.Pattern;
  * Разделяет текст материала на блоки-уроки.
  * <p>
  * Этап 1. Структурный анализ: поиск заголовков (markdown "#", "Глава N",
- * "Раздел N", "§ N", "1.2 Название"). Если заголовков достаточно — текст
- * делится по ним.
+ * "Раздел N", "§ N", "1. Название", "1.2 Название"). Нумерованные разделы
+ * распознаются по монотонной нумерации (1, 2, 3, ...), что отличает их от
+ * пунктов списков внутри разделов, которые начинаются заново с 1.
+ * Заголовки, разорванные переносом строки при извлечении из PDF,
+ * склеиваются обратно.
  * </p>
  * <p>
- * Этап 2. Fallback: если заголовков мало, текст делится по объёму —
+ * Этап 2. Fallback: если заголовков нет вовсе, текст делится по объёму —
  * группировка абзацев в блоки по 500–800 слов; слишком длинные абзацы
  * дробятся по предложениям.
  * </p>
@@ -27,15 +30,28 @@ import java.util.regex.Pattern;
  */
 public class TextSplitter {
 
-    /** Заголовок: markdown, «Глава/Тема/Раздел/Параграф N ...», «§ N ...», «1.2 Название». */
+    /**
+     * Заголовок: markdown, «Глава/Тема/Раздел/Параграф/Пункт N ...», «§ N ...»,
+     * нумерованные разделы («1. Название», «1.2 Название», «1) Название»).
+     * Номер нумерованного раздела захватывается в группу 2.
+     * (?-i:[А-ЯЁA-Z]) — после номера обязана идти заглавная буква
+     * (без учёта общего флага CASE_INSENSITIVE): отсекает строки
+     * вроде «2.5 раза больше».
+     */
     private static final Pattern HEADING_LINE = Pattern.compile(
             "^\\s*(#{1,3}\\s+\\S.*"
-                    + "|(?:Глава|Тема|Раздел|Параграф)\\b\\s*№?\\s*[\\d.]*[\\s.:—–-]*\\S.*"
+                    + "|(?:Глава|Тема|Раздел|Параграф|Пункт)\\b\\s*№?\\s*[\\d.]*[\\s.:—–-]*\\S.*"
                     + "|§\\s*[\\d.]+\\s*\\S.*"
-                    + "|\\d+(?:\\.\\d+)+\\s+\\S.*)\\s*$",
+                    + "|(\\d+(?:\\.\\d+)*)[.)]?\\s+(?-i:[А-ЯЁA-Z]).*)\\s*$",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
-                    | Pattern.UNICODE_CHARACTER_CLASS); // <-- добавлен этот флаг
+                    | Pattern.UNICODE_CHARACTER_CLASS);
 
+    /** Строка, начинающаяся с номера, — для распознавания пунктов списков. */
+    private static final Pattern NUMBERED_ITEM = Pattern.compile(
+            "\\d+(?:\\.\\d+)*[.)]?\\s+\\S.*");
+
+    /** Заголовок не бывает длиннее — ограждение от ложных срабатываний. */
+    private static final int MAX_HEADING_LENGTH = 120;
 
     private static final int MIN_WORDS = 500;
     private static final int MAX_WORDS = 800;
@@ -56,7 +72,17 @@ public class TextSplitter {
         String clean = normalize(text);
 
         List<Section> sections = splitByHeadings(clean);
-        if (sections.size() < 2) {
+        // Fallback по объёму применяем только если заголовков нет вовсе.
+        // Материал из одного раздела («Глава 2: ...») — валидный материал:
+        // при size() < 2 его заголовок терялся, и урок получал тему «Урок 1».
+        boolean hasTitles = false;
+        for (Section s : sections) {
+            if (s.titled) {
+                hasTitles = true;
+                break;
+            }
+        }
+        if (!hasTitles) {
             sections = splitByWordCount(clean);
         }
 
@@ -86,15 +112,65 @@ public class TextSplitter {
         StringBuilder currentContent = new StringBuilder();
         String currentTitle = null;
         String pendingIntro = null;
+        Integer expectedSection = null;   // ожидаемый номер следующего раздела «N.»
+        boolean prevLineWasListItem = false;
 
-        for (String line : lines) {
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
             Matcher m = HEADING_LINE.matcher(line);
-            if (m.matches()) {
+            boolean isHeading = false;
+
+            if (m.matches() && line.strip().length() <= MAX_HEADING_LENGTH) {
+                String number = m.group(2);
+                if (number == null) {
+                    // markdown («#»), «Глава N», «§ N» — заголовок без доп. проверок
+                    isHeading = true;
+                } else if (isNumberedSectionHeading(number, expectedSection,
+                        prevLineWasListItem, lines, i)) {
+                    isHeading = true;
+                    // Заголовок, разорванный переносом при извлечении из PDF,
+                    // склеиваем со следующей строкой
+                    StringBuilder title = new StringBuilder(line.strip());
+                    int j = i + 1;
+                    while (j < lines.length && !lines[j].isBlank()
+                            && (title.toString().endsWith("-")
+                            || Character.isLowerCase(lines[j].strip().charAt(0)))) {
+                        if (!title.toString().endsWith("-")) {
+                            title.append(' ');
+                        }
+                        title.append(lines[j].strip());
+                        j++;
+                    }
+                    if (j > i + 1) {
+                        // ФИКС: matcher заменяем только после успешного matches()
+                        // на склеенной строке. Свежий Matcher без matches() при
+                        // вызове group(1) бросает IllegalStateException — именно
+                        // из-за него загрузка PDF с разорванными заголовками
+                        // падала с сообщением «Не удалось прочитать файл».
+                        Matcher merged = HEADING_LINE.matcher(title.toString());
+                        if (merged.matches()) {
+                            m = merged;
+                            line = title.toString();
+                            i = j - 1; // съеденные строки пропускаются основным циклом
+                        }
+                        // если склеенная строка не совпала с шаблоном — остаёмся
+                        // на исходных m и line: продолжение уйдёт в текст урока
+                    }
+                    expectedSection = Integer.parseInt(number.split("\\.")[0]);
+                } else {
+                    // Совпало с шаблоном, но это пункт списка, а не заголовок
+                    prevLineWasListItem = true;
+                }
+            } else {
+                prevLineWasListItem = false;
+            }
+
+            if (isHeading) {
                 String content = currentContent.toString().strip();
                 if (!content.isEmpty()) {
                     if (currentTitle == null && result.isEmpty()) {
                         // Текст до первого заголовка — это вводка.
-                        // Запоминаем и прильнём к первому уроку, а не выделяем в отдельный блок.
+                        // Приклеим к первому уроку, а не выделяем в отдельный блок.
                         pendingIntro = content;
                     } else {
                         result.add(new Section(currentTitle, content, currentTitle != null));
@@ -102,10 +178,12 @@ public class TextSplitter {
                 }
                 currentTitle = cleanTitle(m.group(1));
                 currentContent = new StringBuilder();
+                prevLineWasListItem = false;
             } else {
                 currentContent.append(line).append('\n');
             }
         }
+
         String content = currentContent.toString().strip();
         if (!content.isEmpty()) {
             if (currentTitle == null && result.isEmpty()) {
@@ -115,7 +193,7 @@ public class TextSplitter {
             }
         }
 
-        // Вводка приклеивается в начало первого заголовкованного урока
+        // Вводка приклеивается в начало первого озаглавленного урока
         if (pendingIntro != null && !result.isEmpty()) {
             Section first = result.get(0);
             result.set(0, new Section(first.title, pendingIntro + "\n\n" + first.content, first.titled));
@@ -126,6 +204,42 @@ public class TextSplitter {
         return result;
     }
 
+    /**
+     * «N. Название» — заголовок раздела, а не пункт списка.
+     * <p>
+     * Логика: раздел «1.» может быть первым; дальше номера идут по возрастанию
+     * без пропусков (1, 2, ..., 11). Пункты списков внутри разделов начинаются
+     * заново с 1 и потому нарушают монотонность; дополнительно пункт списка не
+     * признаётся заголовком, если соседняя содержательная строка тоже нумерованная.
+     * </p>
+     */
+    private boolean isNumberedSectionHeading(String number, Integer expected,
+                                             boolean prevLineWasListItem, String[] lines, int index) {
+        int n = Integer.parseInt(number.split("\\.")[0]);
+        if (number.contains(".")) {
+            // «1.2 Название» — всегда заголовок подраздела
+            return true;
+        }
+        // Пункт списка: предыдущая или следующая содержательная строка тоже нумерованная
+        if (prevLineWasListItem || nextMeaningfulLineIsNumbered(lines, index)) {
+            return false;
+        }
+        return (expected == null && n == 1)              // первый раздел
+                || (expected != null && n == expected + 1); // продолжение сквозной нумерации
+    }
+
+    /** Проверяет, является ли следующая непустая строка нумерованным пунктом. */
+    private boolean nextMeaningfulLineIsNumbered(String[] lines, int index) {
+        for (int j = index + 1; j < lines.length; j++) {
+            String t = lines[j].strip();
+            if (t.isEmpty()) {
+                continue;
+            }
+            return HEADING_LINE.matcher(t).matches()
+                    && NUMBERED_ITEM.matcher(t).matches();
+        }
+        return false;
+    }
 
     /** Убирает markdown-решётки из заголовка. */
     private String cleanTitle(String line) {
@@ -143,8 +257,10 @@ public class TextSplitter {
             int pWords = countWords(paragraph);
 
             if (pWords > MAX_WORDS) {
-                // Сначала сбрасываем накопленное, потом дробим большой абзац по предложениям
-                if (words >= MIN_WORDS) {
+                // Сбрасываем накопленное всегда, а не только при words >= MIN_WORDS.
+                // Иначе куски большого абзаца попадают в результат раньше текста,
+                // накопленного перед ним, — порядок чтения нарушается.
+                if (current.length() > 0) {
                     result.add(new Section(null, current.toString().strip(), false));
                     current = new StringBuilder();
                     words = 0;

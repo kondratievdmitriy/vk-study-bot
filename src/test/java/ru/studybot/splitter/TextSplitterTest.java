@@ -51,6 +51,95 @@ class TextSplitterTest {
     }
 
     @Test
+    void singleNumberedSectionsAreHeadings() {
+        String text = """
+                1. Введение.
+                Текст введения.
+                
+                2. Основная часть.
+                Текст основной части.
+                """;
+        List<Lesson> lessons = splitter.split(text, "book-1");
+
+        assertEquals(2, lessons.size());
+        assertEquals("1. Введение.", lessons.get(0).getTopic());
+        assertEquals("2. Основная часть.", lessons.get(1).getTopic());
+    }
+
+    @Test
+    void numberedSectionsWithInternalLists() {
+        // Регрессия: пункты списка внутри разделов не должны считаться заголовками
+        String text = """
+                1. Первый раздел.
+                Текст первого раздела про RLE.
+                1. Пункт списка один.
+                2. Пункт списка два.
+                3. Пункт списка три.
+
+                2. Второй раздел.
+                Текст второго раздела.
+
+                3. Третий раздел.
+                Текст третьего раздела.
+                """;
+        List<Lesson> lessons = splitter.split(text, "book-1");
+
+        assertEquals(3, lessons.size());
+        assertEquals("1. Первый раздел.", lessons.get(0).getTopic());
+        assertEquals("2. Второй раздел.", lessons.get(1).getTopic());
+        assertTrue(lessons.get(0).getContent().contains("Пункт списка два"));
+    }
+
+    @Test
+    void decimalNumberIsNotHeading() {
+        // «2.5 раза больше» — не заголовок, текст не должен рваться
+        String text = "Скорость выросла в 2.5 раза больше ожидаемого. Всё это один абзац.";
+        List<Lesson> lessons = splitter.split(text, "book-1");
+
+        assertEquals(1, lessons.size());
+        assertEquals("Урок 1", lessons.get(0).getTopic());
+    }
+
+    @Test
+    void fallbackPreservesTextOrder() {
+        // Регрессия: при дроблении длинного абзаца порядок текста не должен нарушаться
+        String paragraph = ("слово ").repeat(399); // 399 слов + маркер
+        String[] markers = {"Первый", "Второй", "Третий", "Четвертый", "Пятый"};
+        StringBuilder sb = new StringBuilder();
+        for (String marker : markers) {
+            sb.append(marker).append(" блок. ").append(paragraph).append("\n\n");
+        }
+        List<Lesson> lessons = splitter.split(sb.toString(), "book-1");
+
+        assertTrue(lessons.size() >= 3);
+        assertTrue(lessons.get(0).getContent().contains("Первый блок"));
+        assertTrue(lessons.get(1).getContent().contains("Второй блок"));
+        assertTrue(lessons.get(2).getContent().contains("Третий блок"));
+    }
+
+    @Test
+    void longParagraphIsSplitIntoChunks() {
+        // Длинный абзац из многих предложений дробится по предложениям,
+        // а окружающий текст сохраняет свой порядок
+        String longParagraph = ("Слово номер. ").repeat(500); // 1000 слов
+        String text = "Короткий блок.\n\n" + longParagraph + "\n\nЕще короткий блок.";
+
+        List<Lesson> lessons = splitter.split(text, "book-1");
+
+        assertTrue(lessons.size() > 2);
+        assertTrue(lessons.get(0).getContent().contains("Короткий блок"),
+                "Текст перед длинным абзацем должен идти первым");
+        boolean longPartFound = false;
+        for (Lesson lesson : lessons) {
+            if (lesson.getContent().contains("Слово номер")) {
+                longPartFound = true;
+                break;
+            }
+        }
+        assertTrue(longPartFound, "Длинный абзац должен быть разбит и присутствовать в блоках");
+    }
+
+    @Test
     void fallbackSplitsByWordCount() {
         // Текст без заголовков: 12 абзацев по 150 слов -> блоки по 500-800 слов
         String paragraph = ("слово ").repeat(149) + "конец.";
