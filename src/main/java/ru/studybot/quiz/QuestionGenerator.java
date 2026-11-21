@@ -21,13 +21,23 @@ import java.util.regex.Pattern;
  * из совсем короткого текста вопросы не генерируются вовсе.
  * </p>
  * <p>
- * Источники:
- * - краткий ответ и выбор варианта строятся из предложений-определений
- *   («X — это Y», «X называется Y», «X является Y»);
- * - верно/неверно цитирует предложение целиком: чётные вопросы — исходные
- *   (правильный ответ «Верно»), нечётные — с отрицанием у связки
- *   («X — это не Y», «X не является Y»), правильный ответ «Неверно».
- *   Это удерживает пользователя от ответа «Верно» на автомате.
+ * Распределение по предложениям: вопросы строятся по разным определениям
+ * блока, а не по одному. Краткий ответ — по первому определению, выбор
+ * варианта — по следующему с другим субъектом, верно/неверно — по
+ * оставшимся предложениям (переиспользование — только если других нет).
+ * </p>
+ * <p>
+ * Ложные утверждения верно/неверно строятся отрицанием связки исходного
+ * предложения («X — это не Y», «X не является Y»); при перечислении через
+ * «или» отрицание грамматически корректно разворачивается в «не X и не Y».
+ * Служебные вступления («Вывод:», «Итак,» и т. п.) и хвостовая пунктуация
+ * срезаются из субъекта, предиката и утверждений верно/неверно.
+ * </p>
+ * <p>
+ * Системная нормализация: контент урока выпрямляется один раз на входе
+ * генератора (все Unicode-пробелы — к обычному пробелу, невидимые символы
+ * нулевой ширины — удаляются). Ниже по цепочке NBSP физически не встречается.
+ * Схлопывание повторов работает только на границах слов.
  * </p>
  */
 public class QuestionGenerator {
@@ -44,6 +54,33 @@ public class QuestionGenerator {
     /** Дистрактор короче этого значения («Это», «Что») выглядит мусором. */
     private static final int MIN_DISTRACTOR_LENGTH = 4;
 
+    /** Служебные вступления перед субъектом: «Вывод:», «Итак,», «Таким образом,» и т. п. */
+    private static final Pattern LEADING_DISCOURSE = Pattern.compile(
+            "(?iu)^(вывод\\s*:|итак[,:]?|таким\\s+образом[,:]?|следовательно[,:]?|итого[,:]?)\\s*");
+
+    /** Хвостовая пунктуация субъекта/предиката: запятая перед «— это» и т. п. */
+    private static final Pattern TRAILING_PUNCT = Pattern.compile("[,:;—–-]+\\s*$");
+
+    /**
+     * Любой Unicode-пробел (NBSP, узкие пробелы, U+2000–200A, U+3000 и т. д.).
+     * Флаг UNICODE_CHARACTER_CLASS расширяет \s на всю категорию пробельных —
+     * обычный \s в Java покрывает лишь ASCII.
+     */
+    private static final Pattern ANY_WHITESPACE =
+            Pattern.compile("\\s+", Pattern.UNICODE_CHARACTER_CLASS);
+
+    /**
+     * Схлопывание повторяющихся подряд слов, только на границах слов.
+     * Lookbehind/lookahead по буквам обязательны: без них регулярка
+     * матчит одиночную букву ВНУТРИ слова — «фон Неймана» превращалась
+     * в «фонеймана» (н + Н, регистр сворачивается флагом (?iu)).
+     */
+    private static final Pattern REPEATED_WORD = Pattern.compile(
+            "(?iu)(?<![а-яёa-z])([а-яёa-z][а-яёa-z-]*)(?![а-яёa-z])(?:\\s+\\1(?![а-яёa-z]))+");
+
+    /** Распознанное определение: исходное предложение + вычищенные субъект и предикат. */
+    private record Definition(SupportSentenceFinder.ScoredSentence source, String subject, String predicate) {}
+
     /**
      * Генерирует вопросы по уроку. Результат детерминирован
      * (позиция правильного варианта сдвигается по хешу subject, а не случайностью).
@@ -53,77 +90,112 @@ public class QuestionGenerator {
         if (lesson == null || lesson.getContent() == null || lesson.getContent().isBlank()) {
             return result;
         }
+        // СИСТЕМНАЯ НОРМАЛИЗАЦИЯ: контент урока выпрямляется один раз, на входе.
+        // Все Unicode-пробелы (NBSP и родственные) заменяются обычным пробелом,
+        // невидимые нулевой ширины — удаляются. Ниже по цепочке NBSP физически
+        // не встречается: ни в разборе определений, ни в чистке субъектов,
+        // ни в утверждениях верно/неверно.
+        String content = normalizeSpaces(lesson.getContent());
         List<String> corpus = new ArrayList<>();
         if (allLessons != null) {
             for (Lesson l : allLessons) {
-                corpus.add(l.getContent());
+                corpus.add(l.getContent() == null ? "" : normalizeSpaces(l.getContent()));
             }
         }
-        List<String> keywords = keywordExtractor.extractKeywords(lesson.getContent(), corpus, 8);
+        List<String> keywords = keywordExtractor.extractKeywords(content, corpus, 8);
         List<SupportSentenceFinder.ScoredSentence> sentences =
-                sentenceFinder.findSupportSentences(lesson.getContent(), keywords);
+                sentenceFinder.findSupportSentences(content, keywords);
         if (sentences.isEmpty()) {
             return result;
         }
         List<String> distractorPool = collectDistractors(allLessons, lesson, keywords);
 
+        // 1. Собираем все распознанные определения с вычищенными субъектом/предикатом
+        List<Definition> defs = new ArrayList<>();
+        Set<String> seenFullText = new HashSet<>();
+        for (SupportSentenceFinder.ScoredSentence s : sentences) {
+            String[] parts = parseDefinition(s.text());
+            if (parts == null) continue;
+            String subject = cleanSubject(parts[0]);
+            String predicate = cleanPredicate(parts[1]);
+            if (subject.isBlank() || predicate.isBlank()) continue;
+            if (!seenFullText.add(s.text().toLowerCase())) continue; // защита от дублей предложений
+            defs.add(new Definition(s, subject, predicate));
+        }
+        if (defs.isEmpty()) {
+            return result;
+        }
+
         int number = 1;
-        String[] definition = findDefinition(sentences);
 
-        if (definition != null) {
-            String subject = cleanSubject(definition[0]);
+        // 2. Краткий ответ — по первому определению
+        Definition first = defs.get(0);
+        result.add(new Question(number++, QuestionType.SHORT_ANSWER,
+                "Кратко: что такое " + first.subject() + "?",
+                List.of(),
+                List.of(capitalize(first.predicate())),
+                KeywordExtractor.terms(first.predicate())));
 
-            // Краткий ответ
-            result.add(new Question(number++, QuestionType.SHORT_ANSWER,
-                    "Кратко: что такое " + subject + "?",
-                    List.of(),
-                    List.of(capitalize(definition[1])),
-                    KeywordExtractor.terms(definition[1])));
-
-            // Выбор варианта: правильный ответ + 3 дистрактора
-            List<String> options = buildOptions(definition[1], distractorPool);
+        // 3. Выбор варианта — по следующему определению с ДРУГИМ субъектом.
+        // Если второго субъекта нет — вопрос не дублируем, а пропускаем.
+        Definition choiceDef = null;
+        for (Definition d : defs.subList(1, defs.size())) {
+            if (!d.subject().equalsIgnoreCase(first.subject())) {
+                choiceDef = d;
+                break;
+            }
+        }
+        if (choiceDef != null) {
+            List<String> options = buildOptions(choiceDef.predicate(), distractorPool);
             if (options.size() == 1 + REQUIRED_DISTRACTORS) {
                 result.add(new Question(number++, QuestionType.MULTIPLE_CHOICE,
-                        "Что такое " + subject + "?",
+                        "Что такое " + choiceDef.subject() + "?",
                         options,
-                        List.of(definition[1]),
+                        List.of(choiceDef.predicate()),
                         List.of()));
             }
+        }
 
-            // Верно/неверно: предложение цитируется целиком, ложные — с отрицанием
-            int tfCount = 0;
-            for (SupportSentenceFinder.ScoredSentence s : sentences) {
-                if (tfCount >= MAX_TRUE_FALSE) break;
-                String[] def = parseDefinition(s.text());
-                if (def == null) continue;
-                boolean makeFalse = (tfCount % 2 == 1);
-                String statement;
-                if (makeFalse) {
-                    statement = negate(s.text());
-                    if (statement == null) continue; // не смогли построить отрицание — пропускаем
-                } else {
-                    statement = s.text();
-                }
-                result.add(new Question(number++, QuestionType.TRUE_FALSE,
-                        statement + " Верно ли это утверждение?",
-                        TRUE_FALSE_OPTIONS,
-                        List.of(makeFalse ? "Неверно" : "Верно"),
-                        List.of()));
-                tfCount++;
+        // 4. Верно/неверно: сначала предложения, ещё не использованные в других вопросах,
+        //    затем уже использованные — как запас (иначе тест короче задуманного).
+        Set<String> usedTexts = new HashSet<>();
+        usedTexts.add(first.source().text().toLowerCase());
+        if (choiceDef != null) {
+            usedTexts.add(choiceDef.source().text().toLowerCase());
+        }
+        List<Definition> tfOrder = new ArrayList<>();
+        for (Definition d : defs) {
+            if (!usedTexts.contains(d.source().text().toLowerCase())) {
+                tfOrder.add(d);
             }
+        }
+        for (Definition d : defs) {
+            if (!tfOrder.contains(d)) {
+                tfOrder.add(d);
+            }
+        }
+        int tfCount = 0;
+        for (Definition d : tfOrder) {
+            if (tfCount >= MAX_TRUE_FALSE) break;
+            boolean makeFalse = (tfCount % 2 == 1);
+            // База утверждения без служебных вступлений: «Вывод: X — это Y»
+            // в тексте вопроса смотрится мусором.
+            String base = stripDiscourse(d.source().text());
+            String statement;
+            if (makeFalse) {
+                statement = negate(base);
+                if (statement == null) continue; // не смогли построить отрицание — пропускаем
+            } else {
+                statement = base;
+            }
+            result.add(new Question(number++, QuestionType.TRUE_FALSE,
+                    statement + " Верно ли это утверждение?",
+                    TRUE_FALSE_OPTIONS,
+                    List.of(makeFalse ? "Неверно" : "Верно"),
+                    List.of()));
+            tfCount++;
         }
         return result;
-    }
-
-    /** Ищет первое предложение-определение среди опорных. */
-    private String[] findDefinition(List<SupportSentenceFinder.ScoredSentence> sentences) {
-        for (SupportSentenceFinder.ScoredSentence s : sentences) {
-            String[] def = parseDefinition(s.text());
-            if (def != null) {
-                return def;
-            }
-        }
-        return null;
     }
 
     /** Разбор определения. Возвращает {субъект, предикат} или null. */
@@ -138,34 +210,77 @@ public class QuestionGenerator {
     }
 
     /**
-     * Схлопывает повторяющиеся подряд слова в субъекте определения.
+     * Приводит ЛЮБОЙ Unicode-пробел (NBSP, узкие пробелы, полные и т. д.)
+     * к обычному, а невидимые нулевой ширины (ZWSP, word joiner, BOM) — удаляет.
      * <p>
-     * «Jump-кодирование Jump-кодирование — это …» возникает, когда термин
-     * стоит отдельной строкой (артефакт извлечения из PDF) и склеивается
-     * со следующим предложением. Регулярка делает «X X» -> «X», включая
-     * слова через дефис. Регистр не учитывается.
+     * NBSP и родственные символы регулярно встречаются в текстах из PDF; strip()
+     * и обычный \s их не считают пробелами.
      * </p>
      */
+    static String normalizeSpaces(String s) {
+        return ANY_WHITESPACE.matcher(s).replaceAll(" ")
+                .replace("\u200B", "")
+                .replace("\u2060", "")
+                .replace("\uFEFF", "");
+    }
+
+    /**
+     * Срезает служебное вступление («Вывод:», «Итак,» и т. п.) с начала строки.
+     * Используется и при чистке субъекта, и при построении утверждений
+     * верно/неверно — иначе вступление попадает в текст вопроса целиком.
+     */
+    static String stripDiscourse(String sentence) {
+        return LEADING_DISCOURSE.matcher(normalizeSpaces(sentence.strip()))
+                .replaceFirst("").strip();
+    }
+
+    /**
+     * Чистка субъекта определения:
+     * 1) нормализует все Unicode-пробелы и невидимые символы;
+     * 2) срезает служебные вступления («Вывод:», «Итак,»);
+     * 3) схлопывает повторяющиеся подряд слова ТОЛЬКО на границах слов
+     *    («X X» -> «X» — артефакт PDF; «фон Неймана» не трогает);
+     * 4) убирает хвостовую пунктуацию («…Неймана,» -> «…Неймана»).
+     */
     static String cleanSubject(String subject) {
-        return subject.replaceAll("(?iu)([а-яёa-z][а-яёa-z-]*)(?:\\s+\\1)+", "$1");
+        String s = normalizeSpaces(subject.strip());
+        s = stripDiscourse(s);
+        s = REPEATED_WORD.matcher(s).replaceAll("$1");
+        s = TRAILING_PUNCT.matcher(s).replaceAll("").strip();
+        return s;
+    }
+
+    /** Чистка предиката: нормализует пробелы и убирает хвостовую пунктуацию. */
+    static String cleanPredicate(String predicate) {
+        return TRAILING_PUNCT.matcher(normalizeSpaces(predicate.strip()))
+                .replaceAll("").strip();
     }
 
     /**
      * Строит ложное утверждение из исходного: отрицание добавляется к связке
      * определения («— это» -> «— это не», «является» -> «не является»).
+     * Перечисление через «или» под отрицанием грамматически корректно
+     * разворачивается: «не A или B» -> «не A и не B».
      * Возвращает null, если предложение не является распознаваемым определением.
      */
     String negate(String sentence) {
         String s = sentence.strip();
+        String negated = null;
         if (DEF_DASH.matcher(s).matches()) {
-            return s.replaceFirst("(?i)—\\s*это", "— это не");
-        }
-        for (Pattern p : List.of(DEF_NAMED, DEF_IS)) {
-            if (p.matcher(s).matches()) {
-                return s.replaceFirst("(?i)(называется|является|представляет\\s+собой)", "не $1");
+            negated = s.replaceFirst("(?i)—\\s*это", "— это не");
+        } else {
+            for (Pattern p : List.of(DEF_NAMED, DEF_IS)) {
+                if (p.matcher(s).matches()) {
+                    negated = s.replaceFirst("(?i)(называется|является|представляет\\s+собой)", "не $1");
+                    break;
+                }
             }
         }
-        return null;
+        if (negated == null) {
+            return null;
+        }
+        // «не программная или аппаратная среда» -> «не программная и не аппаратная среда»
+        return negated.replaceFirst("(?iu)не\\s+([^,.;:!?]+?)\\s+или\\s+", "не $1 и не ");
     }
 
     /** Пул дистракторов: ключевые слова других уроков + прочие слова текущего блока. */
@@ -174,11 +289,12 @@ public class QuestionGenerator {
         if (allLessons != null) {
             for (Lesson l : allLessons) {
                 if (l == current) continue;
-                pool.addAll(KeywordExtractor.terms(l.getContent()));
+                pool.addAll(KeywordExtractor.terms(l.getContent() == null ? "" : normalizeSpaces(l.getContent())));
             }
         }
         Set<String> keywordSet = new HashSet<>(currentKeywords);
-        for (String term : KeywordExtractor.terms(current.getContent())) {
+        String currentContent = current.getContent() == null ? "" : normalizeSpaces(current.getContent());
+        for (String term : KeywordExtractor.terms(currentContent)) {
             if (!keywordSet.contains(term)) {
                 pool.add(term);
             }
@@ -202,7 +318,7 @@ public class QuestionGenerator {
             return List.of();
         }
         List<String> options = new ArrayList<>();
-        options.add(correct);
+        options.add(capitalize(correct));
         options.addAll(distractors);
         Collections.rotate(options, Math.floorMod(correct.hashCode(), options.size()));
         return options;
