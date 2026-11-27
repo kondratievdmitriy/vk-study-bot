@@ -17,6 +17,9 @@ import ru.studybot.repository.UserProgressRepository;
 import ru.studybot.repository.impl.InMemoryBookRepository;
 import ru.studybot.repository.impl.InMemoryLessonRepository;
 import ru.studybot.repository.impl.InMemoryUserProgressRepository;
+import ru.studybot.repository.impl.PgBookRepository;
+import ru.studybot.repository.impl.PgLessonRepository;
+import ru.studybot.repository.impl.PgUserProgressRepository;
 
 /**
  * Точка входа в приложение (Entry Point).
@@ -33,10 +36,24 @@ public class Main {
 
         CommandRegistry registry = new CommandRegistry();
 
-        // Репозитории (InMemory — заглушка до БД в задаче 4)
-        BookRepository bookRepo = new InMemoryBookRepository();
-        LessonRepository lessonRepo = new InMemoryLessonRepository();
-        UserProgressRepository progressRepo = new InMemoryUserProgressRepository();
+        // Репозитории: PostgreSQL (задача 4) или in-memory (переключатель db.enabled).
+        // Включённая БД при недоступном сервере даёт понятную ошибку сразу на старте —
+        // это лучше, чем падение бота на первом же сообщении пользователя.
+        boolean useDb = Boolean.parseBoolean(BotConfig.get("db.enabled"));
+        BookRepository bookRepo;
+        LessonRepository lessonRepo;
+        UserProgressRepository progressRepo;
+        if (useDb) {
+            bookRepo = new PgBookRepository();
+            lessonRepo = new PgLessonRepository();
+            progressRepo = new PgUserProgressRepository();
+            System.out.println("Хранилище: PostgreSQL (" + BotConfig.get("db.url") + ")");
+        } else {
+            bookRepo = new InMemoryBookRepository();
+            lessonRepo = new InMemoryLessonRepository();
+            progressRepo = new InMemoryUserProgressRepository();
+            System.out.println("Хранилище: in-memory (db.enabled=false)");
+        }
 
         // Регистрируем команды
         registry.register(new AuthorCommand());

@@ -35,10 +35,6 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- ========================================== -->
-        <!-- НОВЫЕ БИБЛИОТЕКИ ДЛЯ ЧТЕНИЯ ФАЙЛОВ         -->
-        <!-- ========================================== -->
-        
         <!-- Для чтения PDF файлов -->
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
@@ -51,6 +47,15 @@
             <groupId>org.apache.poi</groupId>
             <artifactId>poi-ooxml</artifactId>
             <version>5.2.5</version>
+        </dependency>
+
+        <!-- ========================================== -->
+        <!-- НОВОЕ: PostgreSQL JDBC-драйвер (задача 4)  -->
+        <!-- ========================================== -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.3</version>
         </dependency>
 
     </dependencies>
