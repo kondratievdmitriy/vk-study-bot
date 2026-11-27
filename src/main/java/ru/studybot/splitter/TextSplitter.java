@@ -335,14 +335,26 @@ public class TextSplitter {
         return chunks;
     }
 
-    /** Перекрытие: 1–2 последних предложения предыдущего блока, не более OVERLAP_MAX_CHARS. */
+    /** Перекрытие: 1–2 последних ПОЛНЫХ предложения предыдущего блока, не более OVERLAP_MAX_CHARS.
+     *  Обрывки без точки (последняя строка, разорванная извлечением из PDF) в перекрытие
+     *  не попадают: иначе они приклеиваются к первому предложению следующего блока
+     *  и порождают дубли слов в его первом определении. */
     private String makeOverlap(String content) {
         String[] sentences = content.strip().split("(?<=[.!?…])\\s+");
+        List<String> complete = new ArrayList<>();
+        for (String s : sentences) {
+            String t = s.strip();
+            if (t.matches("(?s).+[.!?…]$")) {
+                complete.add(t);
+            }
+        }
         StringBuilder sb = new StringBuilder();
-        for (int i = Math.max(0, sentences.length - 2); i < sentences.length; i++) {
-            if (sb.length() + sentences[i].length() > OVERLAP_MAX_CHARS) break;
+        int from = Math.max(0, complete.size() - 2);
+        for (int i = from; i < complete.size(); i++) {
+            String s = complete.get(i);
+            if (sb.length() + s.length() > OVERLAP_MAX_CHARS) break;
             if (sb.length() > 0) sb.append(' ');
-            sb.append(sentences[i]);
+            sb.append(s);
         }
         return sb.toString();
     }

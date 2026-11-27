@@ -26,13 +26,21 @@ import java.util.logging.Logger;
  * {@link ru.studybot.platform.Platform}, поэтому ядро бота не зависит от
  * деталей протокола VK и в будущем может работать с другой платформой.
  * </p>
+ * <p>
+ * Сообщения отправляются POST-запросом: длинный текст урока в GET-параметре
+ * раздувает URL до десятков килобайт, и сервер VK разрывает соединение
+ * (EOF reached while reading). Дополнительно текст нарезается на куски
+ * в пределах лимита VK на длину сообщения (4096 символов).
+ * </p>
  */
-
 public class VKPlatform implements Platform {
     private static final Logger LOG = Logger.getLogger(VKPlatform.class.getName());
     private static final String API_BASE = "https://api.vk.com/method/";
     private static final String API_VERSION = "5.199";
     private static final int LONG_POLL_WAIT = 25;
+
+    /** Лимит VK на длину одного сообщения — с запасом ниже официальных 4096. */
+    private static final int MESSAGE_CHUNK_LIMIT = 3800;
 
     private final String token;
     private final int groupId;
@@ -77,21 +85,56 @@ public class VKPlatform implements Platform {
 
     @Override
     public void sendMessage(long peerId, String text) {
+        if (text == null || text.isBlank()) {
+            return;
+        }
+        for (String chunk : splitMessage(text)) {
+            sendChunk(peerId, chunk);
+        }
+    }
+
+    private void sendChunk(long peerId, String chunk) {
         try {
-            String url = API_BASE + "messages.send"
-                    + "?peer_id=" + peerId
+            // POST с телом в формате form-urlencoded: длинный текст не раздувает URL
+            String body = "peer_id=" + peerId
                     + "&random_id=" + random.nextInt()
-                    + "&message=" + URLEncoder.encode(text, StandardCharsets.UTF_8)
+                    + "&message=" + URLEncoder.encode(chunk, StandardCharsets.UTF_8)
                     + "&access_token=" + token
                     + "&v=" + API_VERSION;
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .GET()
+                    .uri(URI.create(API_BASE + "messages.send"))
+                    .header("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
+                    .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
                     .build();
-            http.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response =
+                    http.send(request, HttpResponse.BodyHandlers.ofString());
+            // Логируем тело ответа: там VK пишет код ошибки (например, 9 — сообщение слишком длинное).
+            // Раньше ответ игнорировался, и любые ошибки API выглядели как тишина.
+            String body2 = response.body();
+            if (body2 != null && body2.contains("\"error\"")) {
+                LOG.warning("VK API вернул ошибку: " + body2);
+            }
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Не удалось отправить сообщение: " + peerId, e);
         }
+    }
+
+    /** Нарезает текст на куски в пределах лимита VK, стараясь резать по строкам. */
+    static List<String> splitMessage(String text) {
+        List<String> chunks = new ArrayList<>();
+        int start = 0;
+        while (start < text.length()) {
+            int end = Math.min(start + MESSAGE_CHUNK_LIMIT, text.length());
+            if (end < text.length()) {
+                int lineBreak = text.lastIndexOf('\n', end);
+                if (lineBreak > start) {
+                    end = lineBreak; // режем по границе строки, не посреди слова
+                }
+            }
+            chunks.add(text.substring(start, end));
+            start = end;
+        }
+        return chunks;
     }
 
     private void initLongPollServer() {
@@ -152,7 +195,7 @@ public class VKPlatform implements Platform {
                 long peerId = message.path("peer_id").asLong();
                 String text = message.path("text").asText();
 
-                // === НОВОЕ: Извлекаем вложения (файлы/документы) из сообщения ===
+                // Извлекаем вложения (файлы/документы) из сообщения
                 List<String> attachmentUrls = new ArrayList<>();
                 JsonNode attachments = message.path("attachments");
                 if (attachments.isArray()) {
@@ -166,11 +209,8 @@ public class VKPlatform implements Platform {
                         }
                     }
                 }
-                // ==================================================================
 
                 LOG.info("Получено сообщение от " + peerId + ": " + text);
-
-                // === НОВОЕ: Передаем список URL вложений в Bot ===
                 String reply = bot.processMessage(text, peerId, attachmentUrls);
                 sendMessage(peerId, reply);
             }
