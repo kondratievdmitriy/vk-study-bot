@@ -10,6 +10,11 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * Тесты оценивания ответов: выбор варианта (точно/неверно/мусорный ввод),
+ * краткий ответ по ключевым словам (полное покрытие, частичное, нулевое)
+ * и сводная оценка урока по границам шкалы LessonScore.
+ */
 class AnswerEvaluatorTest {
     private final AnswerEvaluator evaluator = new AnswerEvaluator();
 
@@ -26,6 +31,7 @@ class AnswerEvaluatorTest {
                 List.of("сокрытие", "деталей", "реализации"));
     }
 
+    /** Правильный номер варианта — максимум баллов. */
     @Test
     void choiceCorrectAnswerScoresMax() {
         QuestionResult r = evaluator.evaluate(choiceQuestion(), "1");
@@ -33,6 +39,7 @@ class AnswerEvaluatorTest {
         assertEquals(1, r.getScore());
     }
 
+    /** Неверный номер — ноль, не ошибка. */
     @Test
     void choiceWrongAnswerScoresZero() {
         QuestionResult r = evaluator.evaluate(choiceQuestion(), "2");
@@ -40,6 +47,8 @@ class AnswerEvaluatorTest {
         assertEquals(0, r.getScore());
     }
 
+    /** Мусор и номер вне диапазона — ноль без исключений: пользователь
+     *  не должен получать stacktrace за опечатку. */
     @Test
     void choiceInvalidInputIsNotErrorButZero() {
         QuestionResult r = evaluator.evaluate(choiceQuestion(), "abc");
@@ -50,6 +59,7 @@ class AnswerEvaluatorTest {
         assertFalse(r2.isCorrect());
     }
 
+    /** Все ключевые слова краткого ответа — максимум (2 балла). */
     @Test
     void shortAnswerWithAllKeywordsScoresMax() {
         QuestionResult r = evaluator.evaluate(shortQuestion(), "Это сокрытие деталей реализации!");
@@ -57,6 +67,7 @@ class AnswerEvaluatorTest {
         assertEquals(2, r.getScore());
     }
 
+    /** 2 из 3 ключевых слов — частичный балл (1 из 3 = 33% → 0). */
     @Test
     void shortAnswerWithHalfKeywordsScoresPartial() {
         // 1 из 3 ключевых слов = 33% -> 0; 2 из 3 = 67% -> 1
@@ -64,12 +75,15 @@ class AnswerEvaluatorTest {
         assertEquals(1, r.getScore());
     }
 
+    /** Ни одного ключевого слова — ноль. */
     @Test
     void shortAnswerWithNoKeywordsScoresZero() {
         QuestionResult r = evaluator.evaluate(shortQuestion(), "что-то совсем другое");
         assertEquals(0, r.getScore());
     }
 
+    /** Сводная оценка урока: 5/5 и 4/5 — PASSED, 3/5 — CONDITIONALLY_PASSED,
+     *  2/5 — FAILED (границы шкалы на живых данных). */
     @Test
     void lessonScoreBoundaries() {
         List<Question> fiveSingleScore = List.of(
@@ -92,6 +106,7 @@ class AnswerEvaluatorTest {
                         allCorrect.get(0), allCorrect.get(1), wrong, wrong, wrong)).getStatus());
     }
 
+    /** Пустой урок — null, а не исключение. */
     @Test
     void emptyLessonReturnsNull() {
         assertNull(evaluator.evaluateLesson(List.of(), List.of()));

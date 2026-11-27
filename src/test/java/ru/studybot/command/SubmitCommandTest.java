@@ -66,6 +66,7 @@ class SubmitCommandTest {
     }
 
 
+    /** Полностью верные ответы: PASSED, попытка засчитана, /next открывает урок 2. */
     @Test
     void correctAnswers_updateProgressAndOpenNext() {
         String result = submitCommand.execute(
@@ -82,6 +83,7 @@ class SubmitCommandTest {
         assertTrue(next.contains("Переход к следующему уроку"));
     }
 
+    /** Все ответы неверны: FAILED, /next блокирован — переход не открывается. */
     @Test
     void failedAnswers_blockNext() {
         submitCommand.execute(new MessageContext(PEER_ID, TITLE + " 1 | 2; 2", List.of()));
@@ -93,6 +95,7 @@ class SubmitCommandTest {
         assertTrue(next.contains("Тест не сдан"));
     }
 
+    /** Граница 60%: 2 из 3 (67%) — CONDITIONALLY_PASSED, переход всё равно открыт. */
     @Test
     void conditionallyPassed_stillOpensNext() {
         // 1 из 2 = 50% → FAILED; проверим границу 60%: короткий ответ отсутствует,
@@ -117,6 +120,8 @@ class SubmitCommandTest {
         assertTrue(next.contains("Переход к следующему уроку"));
     }
 
+    /** Число ответов не совпадает с числом вопросов — ошибка формата,
+     *  прогресс не создаётся и не меняется. */
     @Test
     void answersCountMismatch_returnsError() {
         String result = submitCommand.execute(
@@ -125,6 +130,8 @@ class SubmitCommandTest {
         assertNull(progressRepo.findByPeerId(PEER_ID),
                 "При ошибке формата прогресс не должен меняться");
     }
+
+    /** Последний урок книги: после его сдачи /next завершает изучение (DONE). */
     @Test
     void passingLastLesson_marksProgressDone() {
         // Второй урок — последний в книге: после его сдачи /next завершает изучение

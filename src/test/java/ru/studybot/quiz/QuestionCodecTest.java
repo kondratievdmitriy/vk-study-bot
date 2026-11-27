@@ -8,8 +8,13 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * Тесты сериализации вопросов в JSON и обратно: сохранение всех полей,
+ * ключевых слов краткого ответа, устойчивость к пустому и битому JSON.
+ */
 class QuestionCodecTest {
 
+    /** Round trip сохраняет все поля вопроса, включая id. */
     @Test
     void roundTrip_preservesAllFields() {
         Question original = new Question(1, QuestionType.MULTIPLE_CHOICE,
@@ -34,6 +39,7 @@ class QuestionCodecTest {
         assertEquals(original.getId(), q.getId());
     }
 
+    /** Round trip сохраняет ключевые слова краткого ответа. */
     @Test
     void roundTrip_shortAnswerWithKeywords() {
         Question original = new Question(2, QuestionType.SHORT_ANSWER,
@@ -49,6 +55,7 @@ class QuestionCodecTest {
         assertEquals(original.getCorrectAnswers(), restored.get(0).getCorrectAnswers());
     }
 
+    /** null, пустая и пробельная строка дают пустой список без исключений. */
     @Test
     void emptyOrNullJsonReturnsEmptyList() {
         assertTrue(QuestionCodec.fromJson(null).isEmpty());
@@ -56,6 +63,8 @@ class QuestionCodecTest {
         assertTrue(QuestionCodec.fromJson("   ").isEmpty());
     }
 
+    /** Битый JSON даёт IllegalStateException с понятным сообщением —
+     *  а не проверочное исключение Jackson. */
     @Test
     void corruptedJsonThrowsWithClearMessage() {
         assertThrows(IllegalStateException.class, () -> QuestionCodec.fromJson("{broken"));

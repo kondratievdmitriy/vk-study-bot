@@ -14,6 +14,12 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * Модульные тесты /learn: начало изучения книги и продолжение.
+ * BookRepository и LessonRepository — минимальные стабы (одна книга «Java»
+ * с двумя уроками), прогресс — реальный InMemoryUserProgressRepository:
+ * именно его контракт сохранения прогресса и проверяется.
+ */
 class LearnCommandTest {
 
     private LearnCommand learnCommand;
@@ -31,6 +37,8 @@ class LearnCommandTest {
         learnCommand = new LearnCommand(bookRepo, lessonRepo, progressRepo);
     }
 
+    /** Старт новой книги: бот показывает первый урок и подсказывает /quiz,
+     *  а прогресс создаётся с уроком 1 и статусом STUDYING. */
     @Test
     void startNewBook_success() {
         long peerId = 100L;
@@ -41,7 +49,7 @@ class LearnCommandTest {
         assertTrue(result.contains("Урок 1"));
         assertTrue(result.contains("Введение в Java"));
         assertTrue(result.contains("/quiz"));
-        
+
         // Проверяем, что прогресс сохранился
         UserProgress progress = progressRepo.findByPeerId(peerId);
         assertNotNull(progress);
@@ -49,6 +57,7 @@ class LearnCommandTest {
         assertEquals(UserProgress.Status.STUDYING, progress.getStatus());
     }
 
+    /** Книги нет в репозитории — пользователь получает внятный отказ, а не исключение. */
     @Test
     void startNewBook_bookNotFound() {
         long peerId = 101L;
@@ -58,6 +67,7 @@ class LearnCommandTest {
         assertTrue(result.contains("не найдена"));
     }
 
+    /** «/learn» без аргументов при отсутствии прогресса подсказывает, как начать. */
     @Test
     void continueLearning_noBookSelected() {
         long peerId = 102L;

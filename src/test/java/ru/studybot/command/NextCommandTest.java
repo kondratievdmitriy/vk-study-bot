@@ -12,6 +12,11 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * Модульные тесты /next: переход между уроками зависит от результата последнего
+ * теста. Состояния прогресса задаются вручную, чтобы проверить каждую ветку
+ * автомата (STUDYING → PASSED/FAILED → REPEATING) изолированно.
+ */
 class NextCommandTest {
 
     private NextCommand nextCommand;
@@ -36,14 +41,17 @@ class NextCommandTest {
         nextCommand = new NextCommand(bookRepo, lessonRepo, progressRepo);
     }
 
+    /** Тест ещё не сдан (lastLessonStatus не задан) — переход заблокирован. */
     @Test
     void nextWhenTestNotTaken_blocked() {
         MessageContext context = new MessageContext(peerId, "", List.of());
         String result = nextCommand.execute(context);
-        
+
         assertTrue(result.contains("Вы ещё не прошли тест"));
     }
 
+    /** После FAILED переход заблокирован, статус уходит в REPEATING,
+     *  номер урока не растёт. */
     @Test
     void nextWhenFailed_blockedAndRepeating() {
         // Симулируем, что напарник записал статус FAILED
@@ -56,12 +64,14 @@ class NextCommandTest {
 
         assertTrue(result.contains("Тест не сдан"));
         assertTrue(result.contains("/learn"));
-        
+
         // Проверяем, что номер урока НЕ увеличился
         assertEquals(1, progressRepo.findByPeerId(peerId).getCurrentLessonNumber());
         assertEquals(UserProgress.Status.REPEATING, progressRepo.findByPeerId(peerId).getStatus());
     }
 
+    /** После PASSED переход разрешён: номер урока растёт, статус возвращается
+     *  в STUDYING. */
     @Test
     void nextWhenPassed_successTransition() {
         // Симулируем успешную сдачу теста
@@ -74,7 +84,7 @@ class NextCommandTest {
 
         assertTrue(result.contains("Переход к следующему уроку"));
         assertTrue(result.contains("Урок 2"));
-        
+
         // Проверяем, что номер урока увеличился
         assertEquals(2, progressRepo.findByPeerId(peerId).getCurrentLessonNumber());
         assertEquals(UserProgress.Status.STUDYING, progressRepo.findByPeerId(peerId).getStatus());

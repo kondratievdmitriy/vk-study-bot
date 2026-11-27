@@ -10,6 +10,12 @@ import ru.studybot.repository.impl.InMemoryBookRepository;
 import ru.studybot.repository.impl.InMemoryLessonRepository;
 import ru.studybot.splitter.TextSplitter;
 
+/**
+ * Модульные тесты /upload: текстовый сценарий загрузки (название | текст),
+ * разбиение по заголовкам, перезапись при повторной загрузке и обработка
+ * ошибок формата. Файловый сценарий проверяется только на обработке ошибки —
+ * недоступный URL, чтобы тест не зависел от сети.
+ */
 class UploadCommandTest {
 
     private final BookRepository bookRepo = new InMemoryBookRepository();
@@ -17,6 +23,7 @@ class UploadCommandTest {
     private final UploadCommand command =
             new UploadCommand(bookRepo, lessonRepo, new TextSplitter());
 
+    /** Книга и хотя бы один урок сохраняются в оба репозитория. */
     @Test
     void execute_successfullySavesBookAndLessons() {
         String args = "Java ООП|Основы ООП. Инкапсуляция — это сокрытие деталей реализации. "
@@ -29,6 +36,7 @@ class UploadCommandTest {
         assertTrue(lessonRepo.findAll().size() >= 1);
     }
 
+    /** Заголовки «Глава N: …» становятся темами уроков с нумерацией с 1. */
     @Test
     void execute_splitsTextByChapterHeadings() {
         String args = "Учебник|"
@@ -46,6 +54,8 @@ class UploadCommandTest {
         assertEquals(2, lessonRepo.findAll().get(1).getLessonNumber());
     }
 
+    /** Регрессия: повторная загрузка перезаписывает уроки книги, а не дублирует;
+     *  книга в репозитории остаётся одна. */
     @Test
     void execute_replacesLessonsOnReupload() {
         // Регрессия: повторная загрузка книги перезаписывает уроки, а не дублирует их.
@@ -65,21 +75,24 @@ class UploadCommandTest {
         assertEquals(1, lessonRepo.findAll().get(0).getLessonNumber());
     }
 
+    /** Текст без разделителя «|» — внятная ошибка формата. */
     @Test
     void execute_handlesInvalidFormat() {
         String result = command.execute(new MessageContext(99999L, "Только название без разделителя", List.of()));
         assertTrue(result.contains("Ошибка: неверный формат"));
     }
 
+    /** Пустой аргумент — подсказка по использованию. */
     @Test
     void execute_returnsErrorOnEmptyArgs() {
         String result = command.execute(new MessageContext(99999L, "", List.of()));
         assertTrue(result.contains("Использование"));
     }
 
+    /** Файловый сценарий: недоступный URL даёт сообщение об ошибке чтения,
+     *  а не необработанное исключение. localhost:1 отклоняется мгновенно. */
     @Test
     void execute_withFakeAttachmentReturnsErrorMessage() {
-        // localhost:1 — соединение отклоняется мгновенно, без ожидания
         MessageContext context = new MessageContext(99999L, "Книга", List.of("http://localhost:1/file.pdf"));
         String result = command.execute(context);
         assertTrue(result.contains("Не удалось"));

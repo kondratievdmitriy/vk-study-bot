@@ -7,20 +7,27 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * Тесты сплиттера текста на блоки-уроки: заголовки «Глава N: …», Markdown,
+ * нумерованные разделы (с отличием от пунктов списков и десятичных чисел),
+ * резервное дробление длинных текстов по предложениям/словам с перекрытием
+ * и сохранением порядка.
+ */
 class TextSplitterTest {
     private final TextSplitter splitter = new TextSplitter();
 
+    /** Заголовки глав делят текст на уроки с нумерацией с 1 и корректным bookId. */
     @Test
     void splitsTextByChapterHeadings() {
         String text = """
                 Вводный абзац о книге.
-                
+
                 Глава 1: Основы
                 Текст первой главы.
-                
+
                 Глава 2: Продвинутые темы
                 Текст второй главы.
-                
+
                 Глава 3: Заключение
                 Текст третьей главы.
                 """;
@@ -35,12 +42,13 @@ class TextSplitterTest {
         assertEquals("book-1", lessons.get(0).getBookId());
     }
 
+    /** Markdown-заголовки «## …» распознаются, «##» срезается из темы. */
     @Test
     void splitsMarkdownHeadings() {
         String text = """
                 ## Первая тема
                 Текст первой темы.
-                
+
                 ## Вторая тема
                 Текст второй темы.
                 """;
@@ -50,12 +58,13 @@ class TextSplitterTest {
         assertEquals("Первая тема", lessons.get(0).getTopic());
     }
 
+    /** Одинокие нумерованные строки «1. …» считаются заголовками. */
     @Test
     void singleNumberedSectionsAreHeadings() {
         String text = """
                 1. Введение.
                 Текст введения.
-                
+
                 2. Основная часть.
                 Текст основной части.
                 """;
@@ -66,9 +75,9 @@ class TextSplitterTest {
         assertEquals("2. Основная часть.", lessons.get(1).getTopic());
     }
 
+    /** Регрессия: пункты нумерованного списка внутри раздела — не заголовки. */
     @Test
     void numberedSectionsWithInternalLists() {
-        // Регрессия: пункты списка внутри разделов не должны считаться заголовками
         String text = """
                 1. Первый раздел.
                 Текст первого раздела про RLE.
@@ -90,9 +99,9 @@ class TextSplitterTest {
         assertTrue(lessons.get(0).getContent().contains("Пункт списка два"));
     }
 
+    /** «2.5 раза» — десятичное число, не заголовок: текст не рвётся. */
     @Test
     void decimalNumberIsNotHeading() {
-        // «2.5 раза больше» — не заголовок, текст не должен рваться
         String text = "Скорость выросла в 2.5 раза больше ожидаемого. Всё это один абзац.";
         List<Lesson> lessons = splitter.split(text, "book-1");
 
@@ -100,9 +109,9 @@ class TextSplitterTest {
         assertEquals("Урок 1", lessons.get(0).getTopic());
     }
 
+    /** Регрессия: при дроблении длинного абзаца порядок блоков сохраняется. */
     @Test
     void fallbackPreservesTextOrder() {
-        // Регрессия: при дроблении длинного абзаца порядок текста не должен нарушаться
         String paragraph = ("слово ").repeat(399); // 399 слов + маркер
         String[] markers = {"Первый", "Второй", "Третий", "Четвертый", "Пятый"};
         StringBuilder sb = new StringBuilder();
@@ -117,10 +126,10 @@ class TextSplitterTest {
         assertTrue(lessons.get(2).getContent().contains("Третий блок"));
     }
 
+    /** Длинный абзац дробится по предложениям, окружающий текст не теряется
+     *  и остаётся на своих местах. */
     @Test
     void longParagraphIsSplitIntoChunks() {
-        // Длинный абзац из многих предложений дробится по предложениям,
-        // а окружающий текст сохраняет свой порядок
         String longParagraph = ("Слово номер. ").repeat(500); // 1000 слов
         String text = "Короткий блок.\n\n" + longParagraph + "\n\nЕще короткий блок.";
 
@@ -139,6 +148,8 @@ class TextSplitterTest {
         assertTrue(longPartFound, "Длинный абзац должен быть разбит и присутствовать в блоках");
     }
 
+    /** Резервное дробление: блоки укладываются в лимит слов (с запасом
+     *  на перекрытие). */
     @Test
     void fallbackSplitsByWordCount() {
         // Текст без заголовков: 12 абзацев по 150 слов -> блоки по 500-800 слов
@@ -157,6 +168,7 @@ class TextSplitterTest {
         }
     }
 
+    /** Начало второго блока содержит перекрытие из конца первого. */
     @Test
     void fallbackBlocksHaveOverlap() {
         String paragraph = ("слово ").repeat(149) + "конец.";
@@ -175,6 +187,7 @@ class TextSplitterTest {
         }
     }
 
+    /** Пустой, пробельный и null-текст дают пустой список без исключений. */
     @Test
     void emptyTextReturnsEmptyList() {
         assertTrue(splitter.split("", "book-1").isEmpty());
@@ -182,6 +195,7 @@ class TextSplitterTest {
         assertTrue(splitter.split(null, "book-1").isEmpty());
     }
 
+    /** Короткий текст без заголовков становится одним уроком «Урок 1». */
     @Test
     void singleShortTextBecomesOneLesson() {
         List<Lesson> lessons = splitter.split("Просто короткий текст без заголовков.", "book-1");

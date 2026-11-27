@@ -58,6 +58,7 @@ class PgRepositoryTest {
                 "PostgreSQL недоступен — интеграционные тесты репозиториев пропущены");
     }
 
+    /** Удаляет созданные тестом книги (каскадом — уроки) и тестового пользователя. */
     @AfterEach
     void cleanup() {
         if (connection == null) {
@@ -95,6 +96,7 @@ class PgRepositoryTest {
         return book;
     }
 
+    /** Сохранение, поиск по названию и upsert книги; id восстанавливается из базы. */
     @Test
     void bookSaveFindAndUpdate() {
         PgBookRepository repo = new PgBookRepository();
@@ -120,6 +122,7 @@ class PgRepositoryTest {
         assertEquals(1, repo.findAll().stream().filter(b -> title.equals(b.getTitle())).count());
     }
 
+    /** Upsert уроков по паре (book_id, lesson_number) и сортировка findByBookId по номеру. */
     @Test
     void lessonSaveUpsertAndFindByBookId() {
         PgLessonRepository lessonRepo = new PgLessonRepository();
@@ -146,6 +149,7 @@ class PgRepositoryTest {
         assertEquals(2, sorted.get(1).getLessonNumber());
     }
 
+    /** Уникальное ограничение БД отвергает прямой INSERT с дублирующим номером урока. */
     @Test
     void duplicateLessonNumberInSameBookRejectedByDatabase() {
         PgLessonRepository lessonRepo = new PgLessonRepository();
@@ -164,6 +168,8 @@ class PgRepositoryTest {
         });
     }
 
+    /** Прогресс ссылается на реальную книгу (FK users → books); round trip
+     *  сохраняет все поля и попытки по урокам; повторный save обновляет строку. */
     @Test
     void userProgressRoundTrip() {
         PgUserProgressRepository repo = new PgUserProgressRepository();
