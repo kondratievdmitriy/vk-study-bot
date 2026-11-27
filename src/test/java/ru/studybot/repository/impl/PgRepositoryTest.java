@@ -1,5 +1,6 @@
 package ru.studybot.repository.impl;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import ru.studybot.db.Database;
@@ -11,6 +12,7 @@ import ru.studybot.model.UserProgress;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -24,10 +26,26 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * недоступна — тесты пропускаются, не падают: сборка не должна ломаться
  * на машине без PostgreSQL, а существующие тесты от БД не зависят.
  * </p>
+ * <p>
+ * ЧИСТКА ПОСЛЕ ТЕСТОВ: каждый тест регистрирует созданные им книги
+ * и пользователя, а {@link #cleanup()} после каждого теста удаляет их
+ * из базы. Тесты работают с реальной базой и не должны оставлять
+ * в ней мусор: уроки удаляются каскадом (ON DELETE CASCADE),
+ * прогресс пользователей остаётся, но без ссылки на книгу.
+ * </p>
  */
 class PgRepositoryTest {
 
+    /** Диапазон vk_id для тестовых пользователей — заведомо вне реальных VK-идентификаторов. */
+    private static final long TEST_PEER_ID_BASE = 900_000_000L;
+
     private static Connection connection;
+
+    /** Названия книг, созданных текущим тестом, — удаляются в cleanup(). */
+    private final List<String> createdBookTitles = new ArrayList<>();
+
+    /** vk_id тестового пользователя текущего теста, если он создавался. */
+    private Long createdPeerId;
 
     @BeforeAll
     static void connect() {
@@ -40,12 +58,49 @@ class PgRepositoryTest {
                 "PostgreSQL недоступен — интеграционные тесты репозиториев пропущены");
     }
 
+    @AfterEach
+    void cleanup() {
+        if (connection == null) {
+            return;
+        }
+        for (String title : createdBookTitles) {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "DELETE FROM books WHERE title = ?")) {
+                ps.setString(1, title);
+                ps.executeUpdate();
+            } catch (SQLException ignored) {
+                // чистка не должна ломать результат теста: если удаление не вышло,
+                // строка останется, но следующий запуск тестов создаст новые книги
+            }
+        }
+        createdBookTitles.clear();
+
+        if (createdPeerId != null) {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "DELETE FROM users WHERE vk_id = ?")) {
+                ps.setLong(1, createdPeerId);
+                ps.executeUpdate();
+            } catch (SQLException ignored) {
+                // см. выше
+            }
+            createdPeerId = null;
+        }
+    }
+
+    /** Создаёт книгу, регистрирует её для последующей чистки и сохраняет в базу. */
+    private Book createBook(String title) {
+        createdBookTitles.add(title);
+        Book book = new Book(title);
+        new PgBookRepository().save(book);
+        return book;
+    }
+
     @Test
     void bookSaveFindAndUpdate() {
         PgBookRepository repo = new PgBookRepository();
-        String title = "Тестовая книга " + UUID.randomUUID();
+        Book book = createBook("Тестовая книга " + UUID.randomUUID());
+        String title = book.getTitle();
 
-        Book book = new Book(title);
         book.setAuthor("Автор");
         book.setTotalLessons(11);
         repo.save(book);
@@ -67,11 +122,8 @@ class PgRepositoryTest {
 
     @Test
     void lessonSaveUpsertAndFindByBookId() {
-        PgBookRepository bookRepo = new PgBookRepository();
         PgLessonRepository lessonRepo = new PgLessonRepository();
-
-        Book book = new Book("Книга для уроков " + UUID.randomUUID());
-        bookRepo.save(book);
+        Book book = createBook("Книга для уроков " + UUID.randomUUID());
 
         Lesson lesson = new Lesson(book.getId(), 1, "1. Тестовый раздел.", "RLE — это алгоритм сжатия.");
         lesson.setQuestions("[{\"type\":\"SHORT_ANSWER\"}]");
@@ -96,11 +148,8 @@ class PgRepositoryTest {
 
     @Test
     void duplicateLessonNumberInSameBookRejectedByDatabase() {
-        PgBookRepository bookRepo = new PgBookRepository();
         PgLessonRepository lessonRepo = new PgLessonRepository();
-
-        Book book = new Book("Книга для конфликта " + UUID.randomUUID());
-        bookRepo.save(book);
+        Book book = createBook("Книга для конфликта " + UUID.randomUUID());
         lessonRepo.save(new Lesson(book.getId(), 1, "1. Первый.", "Текст"));
 
         // Прямой INSERT с другим id, но тем же (book_id, lesson_number):
@@ -117,9 +166,9 @@ class PgRepositoryTest {
 
     @Test
     void userProgressRoundTrip() {
-        PgBookRepository bookRepo = new PgBookRepository();
         PgUserProgressRepository repo = new PgUserProgressRepository();
-        long peerId = 900_000_000L + new java.util.Random().nextInt(1_000_000);
+        long peerId = TEST_PEER_ID_BASE + new java.util.Random().nextInt(1_000_000);
+        createdPeerId = peerId;
 
         assertNull(repo.findByPeerId(peerId), "нового пользователя быть не должно");
 
@@ -127,8 +176,7 @@ class PgRepositoryTest {
         // users.current_book_id — внешний ключ на books, и база
         // корректно отклоняет «висячие» ссылки (проверено падением
         // предыдущей версии этого теста).
-        Book book = new Book("Книга для прогресса " + UUID.randomUUID());
-        bookRepo.save(book);
+        Book book = createBook("Книга для прогресса " + UUID.randomUUID());
 
         UserProgress progress = new UserProgress(peerId);
         progress.setBookId(book.getId());

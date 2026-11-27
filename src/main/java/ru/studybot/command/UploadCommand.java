@@ -122,6 +122,7 @@ public class UploadCommand implements Command {
             lessonRepo.save(lesson);
         }
         book.setTotalLessons(lessons.size());
+        bookRepo.save(book); // ФИКС: total_lessons в базе не обновлялся — save был только при первом /upload
 
         return "Материал успешно загружен!\n"
                 + "Книга: " + bookTitle + "\n"
